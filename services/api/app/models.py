@@ -1,0 +1,91 @@
+import uuid
+from datetime import datetime, timezone
+
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _uuid() -> str:
+    return str(uuid.uuid4())
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class Vehicle(Base):
+    """A single UAS. Phase 1 runs exactly one (the simulator), but nothing
+    here assumes that -- vehicle_id is a free-form string key throughout."""
+
+    __tablename__ = "vehicles"
+
+    vehicle_id: Mapped[str] = mapped_column(String, primary_key=True)
+    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    armed: Mapped[bool] = mapped_column(Boolean, default=False)
+    flight_mode: Mapped[str] = mapped_column(String, default="UNKNOWN")
+
+
+class TelemetrySample(Base):
+    """One telemetry snapshot. Indexed for the (vehicle, time-range) query
+    pattern -- the same pattern a TimescaleDB hypertable is built for, see
+    docs/adr/0004-telemetry-storage.md."""
+
+    __tablename__ = "telemetry_samples"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    vehicle_id: Mapped[str] = mapped_column(
+        String, ForeignKey("vehicles.vehicle_id"), index=True
+    )
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, index=True
+    )
+    lat: Mapped[float | None] = mapped_column(Float, nullable=True)
+    lon: Mapped[float | None] = mapped_column(Float, nullable=True)
+    alt_m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    relative_alt_m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    heading_deg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    groundspeed_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    roll: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pitch: Mapped[float | None] = mapped_column(Float, nullable=True)
+    yaw: Mapped[float | None] = mapped_column(Float, nullable=True)
+    battery_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    battery_voltage_mv: Mapped[float | None] = mapped_column(Float, nullable=True)
+    gps_fix_type: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    satellites_visible: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    armed: Mapped[bool] = mapped_column(Boolean, default=False)
+    flight_mode: Mapped[str] = mapped_column(String, default="UNKNOWN")
+
+
+class Command(Base):
+    __tablename__ = "commands"
+
+    command_id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    vehicle_id: Mapped[str] = mapped_column(
+        String, ForeignKey("vehicles.vehicle_id"), index=True
+    )
+    command_type: Mapped[str] = mapped_column(String)
+    altitude_m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    status: Mapped[str] = mapped_column(String, default="PENDING")  # PENDING/ACKED/FAILED
+    mav_result: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error: Mapped[str | None] = mapped_column(String, nullable=True)
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class EventLogEntry(Base):
+    """Append-only audit log -- connection changes, commands, arm/mode
+    transitions. Kept separate from TelemetrySample so high-frequency
+    telemetry writes don't bloat the event table."""
+
+    __tablename__ = "event_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    vehicle_id: Mapped[str] = mapped_column(String, index=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    event_type: Mapped[str] = mapped_column(String)
+    detail: Mapped[str | None] = mapped_column(String, nullable=True)

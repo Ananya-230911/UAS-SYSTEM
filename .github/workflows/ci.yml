@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install gateway deps
+        working-directory: services/telemetry-gateway
+        run: pip install -r requirements.txt
+
+      - name: Install API deps
+        working-directory: services/api
+        run: pip install -r requirements.txt
+
+      - name: Test telemetry gateway
+        working-directory: services/telemetry-gateway
+        run: PYTHONPATH=. pytest tests/ -v
+
+      - name: Test API
+        working-directory: services/api
+        run: PYTHONPATH=. pytest tests/ -v
+
+      - name: Check gcs-web JS syntax
+        run: node --check apps/gcs-web/app.js
+
+  integration-smoke-test:
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install all Python deps
+        run: |
+          pip install -r services/api/requirements.txt
+          pip install -r services/telemetry-gateway/requirements.txt
+          pip install -r simulation/sitl/requirements.txt
+
+      - name: Run end-to-end smoke test (sim -> gateway -> API, arm + takeoff)
+        run: python3 scripts/smoke_test.py

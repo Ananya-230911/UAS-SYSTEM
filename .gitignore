@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# Local dev DB
+services/api/*.db
+services/api/*.db-journal
+
+# Local run artifacts
+.run-logs/
+
+# Node (if the gcs-web migration to a build step ever happens)
+node_modules/
+
+# Editors / OS
+.DS_Store
+.vscode/
+.idea/

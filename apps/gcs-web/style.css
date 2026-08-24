@@ -1,0 +1,142 @@
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: #1a1f26;
+  background: #f4f6f8;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.25rem;
+  background: #12203b;
+  color: white;
+}
+
+header h1 {
+  font-size: 1.1rem;
+  margin: 0;
+  font-weight: 600;
+}
+
+.phase-tag {
+  font-size: 0.7rem;
+  font-weight: 400;
+  background: rgba(255, 255, 255, 0.15);
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  margin-left: 0.5rem;
+}
+
+.status {
+  font-size: 0.8rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+}
+
+.status--unknown { background: #4b5563; }
+.status--connected { background: #16a34a; }
+.status--disconnected { background: #dc2626; }
+
+main {
+  display: flex;
+  height: calc(100vh - 52px);
+}
+
+#map {
+  flex: 1;
+  min-width: 0;
+}
+
+#panel {
+  width: 320px;
+  flex-shrink: 0;
+  background: white;
+  border-left: 1px solid #e2e8f0;
+  padding: 1rem;
+  overflow-y: auto;
+}
+
+#panel h2 {
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #475569;
+  margin: 1.25rem 0 0.5rem;
+}
+
+#panel section:first-child h2 {
+  margin-top: 0;
+}
+
+.telemetry-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  row-gap: 0.35rem;
+  column-gap: 0.75rem;
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.telemetry-grid dt {
+  color: #64748b;
+}
+
+.telemetry-grid dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.button-row {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.button-row button {
+  flex: 1;
+  padding: 0.5rem 0.6rem;
+  font-size: 0.8rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #f8fafc;
+  cursor: pointer;
+}
+
+.button-row button:hover {
+  background: #e2e8f0;
+}
+
+.button-row button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+#command-log {
+  margin-top: 0.75rem;
+  font-size: 0.75rem;
+  color: #475569;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+#command-log div {
+  padding: 0.25rem 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+#command-log div.error {
+  color: #dc2626;
+}
+
+.drone-marker {
+  font-size: 20px;
+  line-height: 20px;
+  text-align: center;
+  color: #2563eb;
+  text-shadow: 0 0 2px white, 0 0 2px white;
+}

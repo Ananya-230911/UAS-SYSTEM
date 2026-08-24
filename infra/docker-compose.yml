@@ -1,0 +1,50 @@
+services:
+  api:
+    build:
+      context: ../services/api
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: sqlite:///./uas.db
+      UAS_INTERNAL_TOKEN: dev-secret
+      GATEWAY_BASE_URL: http://gateway:8001
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  gateway:
+    build:
+      context: ../services/telemetry-gateway
+    ports:
+      - "8001:8001"
+      - "14550:14550/udp"
+    environment:
+      VEHICLE_ID: sim-1
+      GATEWAY_MAVLINK_HOST: 0.0.0.0
+      GATEWAY_MAVLINK_PORT: "14550"
+      API_BASE_URL: http://api:8000
+      UAS_INTERNAL_TOKEN: dev-secret
+    depends_on:
+      api:
+        condition: service_healthy
+
+  sitl:
+    build:
+      context: ../simulation/sitl
+    command: ["--target-host", "gateway", "--target-port", "14550"]
+    depends_on:
+      - gateway
+
+  gcs-web:
+    build:
+      context: ../apps/gcs-web
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
+
+# Local, no-Docker equivalent: scripts/run_local.sh runs the same four
+# processes directly with `python3`/`uvicorn`, for environments (like the
+# sandbox this project was originally built in) without a Docker daemon.
