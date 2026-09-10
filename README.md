@@ -27,6 +27,36 @@ simulation/sitl  --MAVLink/UDP-->  telemetry-gateway  --HTTP-->  api  <--WS/REST
 Then open `http://localhost:8080/?api=http://localhost:8000&vehicle=sim-1`
 to see the simulated vehicle on the map, arm it, and command takeoff.
 
+### Quick start on Windows (PowerShell)
+
+`scripts/run_local.sh` is a bash script and won't run natively in
+PowerShell. Run the same four components as separate terminals instead —
+**start them in this order** (API → gateway → simulator), each `cd`'d into
+the service's own directory (each service's package lives *inside* that
+directory — e.g. the API's package is `app`, not `api`, and only resolves
+when the working directory is `services/api`):
+
+```powershell
+# Terminal 1 -- API
+cd services\api
+.\..\..\.venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+# Terminal 2 -- telemetry gateway (after the API is up)
+cd services\telemetry-gateway
+$env:API_BASE_URL = "http://127.0.0.1:8000"
+.\..\..\.venv\Scripts\python.exe -m uvicorn gateway.main:app --host 0.0.0.0 --port 8001
+
+# Terminal 3 -- simulator (after the gateway is up)
+.\.venv\Scripts\python.exe simulation\sitl\sim.py --target-host 127.0.0.1 --target-port 14550
+
+# Terminal 4 -- static GCS UI
+cd apps\gcs-web
+.\..\..\.venv\Scripts\python.exe -m http.server 8080
+```
+
+Then open the same URL as above. `Invoke-RestMethod http://127.0.0.1:8000/health`
+should return `status: ok` once Terminal 1 is running.
+
 ## Quick start (Docker)
 
 ```bash
