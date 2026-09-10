@@ -194,6 +194,29 @@ def prime_connection(conn, state: VehicleState) -> None:
     send_heartbeat(conn, state)
 
 
+def safe_recv_match(conn):
+    """conn.recv_match(blocking=False), tolerating a Windows-only UDP reset.
+
+    If a prior sendto() reached a port with no active listener at that
+    instant (e.g. the destination process hadn't bound yet, or briefly
+    restarted), the OS delivers an ICMP "Port Unreachable" back to the
+    *sender's* own socket. POSIX surfaces that on the next recv() as
+    ECONNREFUSED, which pymavlink's mavudp.recv() already catches
+    internally (see its `except socket.error` clause) -- so on
+    Linux/macOS this condition is invisible above pymavlink. WinSock
+    surfaces the equivalent condition differently: as WSAECONNRESET
+    ("WinError 10054", raised in Python as ConnectionResetError), which is
+    not in pymavlink's catch list and propagates straight up. The socket
+    itself is not actually broken -- sending/receiving keeps working
+    normally afterwards -- so this is safe to treat as "nothing available
+    this iteration", identical to a plain non-blocking empty read.
+    """
+    try:
+        return conn.recv_match(blocking=False)
+    except ConnectionResetError:
+        return None
+
+
 def run(target_host: str, target_port: int, home_lat: float, home_lon: float) -> None:
     conn = mavutil.mavlink_connection(
         f"udpout:{target_host}:{target_port}",
@@ -209,7 +232,7 @@ def run(target_host: str, target_port: int, home_lat: float, home_lon: float) ->
     try:
         while True:
             now = time.time()
-            msg = conn.recv_match(blocking=False)
+            msg = safe_recv_match(conn)
             if msg is not None and msg.get_type() == "COMMAND_LONG":
                 print(f"[sim] COMMAND_LONG command={msg.command} param1={msg.param1} param7={msg.param7}")
                 handle_command(conn, state, msg)

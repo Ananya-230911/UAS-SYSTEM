@@ -74,10 +74,29 @@ class MavlinkGatewayClient:
 
     def _recv_loop(self) -> None:
         while not self._stop.is_set():
-            msg = self._conn.recv_match(blocking=True, timeout=0.5)
+            msg = self._safe_recv_match(timeout=0.5)
             if msg is None:
                 continue
             self._handle_message(msg)
+
+    def _safe_recv_match(self, timeout: float):
+        """self._conn.recv_match(...), tolerating a Windows-only UDP reset.
+
+        Same condition as simulation/sitl/sim.py's safe_recv_match(): if
+        the simulator (or a real vehicle) restarts or is briefly
+        unreachable while this gateway is running, an ICMP Port
+        Unreachable can hit this socket. POSIX surfaces that as
+        ECONNREFUSED, already swallowed inside pymavlink's mavudp.recv();
+        Windows surfaces it as WSAECONNRESET (ConnectionResetError), which
+        is not caught there. Left unhandled this would silently kill this
+        background thread (a daemon thread dying raises no visible error),
+        permanently stopping telemetry ingestion. Treating it as "nothing
+        available this iteration" matches a plain read timeout.
+        """
+        try:
+            return self._conn.recv_match(blocking=True, timeout=timeout)
+        except ConnectionResetError:
+            return None
 
     def _handle_message(self, msg) -> None:
         mtype = msg.get_type()

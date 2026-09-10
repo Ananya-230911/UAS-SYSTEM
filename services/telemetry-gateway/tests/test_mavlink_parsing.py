@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 from pymavlink import mavutil
 
@@ -73,3 +74,26 @@ def test_command_ack_resolves_pending_command():
 
     assert event.wait(timeout=1)
     assert box["result"] == 0
+
+
+def test_safe_recv_match_swallows_windows_connection_reset():
+    # Regression test for WinError 10054 (WSAECONNRESET): if the simulator
+    # (or a real vehicle) restarts or is briefly unreachable, an ICMP Port
+    # Unreachable can hit this socket. POSIX surfaces that as
+    # ECONNREFUSED, already swallowed inside pymavlink; Windows surfaces
+    # it as ConnectionResetError, which isn't. Left unhandled this would
+    # silently kill the background recv thread.
+    client = MavlinkGatewayClient()
+    client._conn = MagicMock()
+    client._conn.recv_match.side_effect = ConnectionResetError()
+
+    assert client._safe_recv_match(timeout=0.5) is None
+
+
+def test_safe_recv_match_passes_through_normal_result():
+    client = MavlinkGatewayClient()
+    client._conn = MagicMock()
+    sentinel = object()
+    client._conn.recv_match.return_value = sentinel
+
+    assert client._safe_recv_match(timeout=0.5) is sentinel
