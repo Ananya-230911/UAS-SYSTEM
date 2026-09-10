@@ -2,6 +2,8 @@ import pytest
 
 from gateway.commands import (
     MAV_CMD_COMPONENT_ARM_DISARM,
+    MAV_CMD_MISSION_START,
+    MAV_CMD_NAV_RETURN_TO_LAUNCH,
     MAV_CMD_NAV_TAKEOFF,
     MODE_NAMES,
     UnsupportedCommand,
@@ -48,3 +50,17 @@ def test_mode_names_cover_sim_modes():
     assert MODE_NAMES[2] == "TAKEOFF"
     assert MODE_NAMES[3] == "LOITER"
     assert MODE_NAMES[4] == "LANDING"
+    assert MODE_NAMES[5] == "MISSION"
+    assert MODE_NAMES[6] == "RTL"
+
+
+def test_rtl_command():
+    cmd = build_command("RTL")
+    assert cmd.command_id == MAV_CMD_NAV_RETURN_TO_LAUNCH
+    assert cmd.params == []
+
+
+def test_mission_start_command():
+    cmd = build_command("MISSION_START")
+    assert cmd.command_id == MAV_CMD_MISSION_START
+    assert cmd.params == [0.0, 0.0]

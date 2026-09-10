@@ -2,14 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>UAS-SYSTEM — GCS (Phase 1)</title>
+  <title>UAS-SYSTEM — GCS (Phase 2)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <header>
-    <h1>UAS-SYSTEM <span class="phase-tag">Phase 1</span></h1>
+    <h1>UAS-SYSTEM <span class="phase-tag">Phase 2</span></h1>
     <div id="connection-status" class="status status--unknown">connecting…</div>
   </header>
 
@@ -28,6 +28,7 @@
           <dt>Battery</dt><dd id="t-battery">—</dd>
           <dt>GPS fix</dt><dd id="t-gps">—</dd>
           <dt>Position</dt><dd id="t-pos">—</dd>
+          <dt>Waypoint</dt><dd id="t-waypoint">—</dd>
           <dt>Last update</dt><dd id="t-updated">—</dd>
         </dl>
       </section>
@@ -38,8 +39,21 @@
           <button id="btn-arm">Arm</button>
           <button id="btn-disarm">Disarm</button>
           <button id="btn-takeoff">Takeoff (20m)</button>
+          <button id="btn-rtl">RTL</button>
         </div>
         <div id="command-log"></div>
+      </section>
+
+      <section>
+        <h2>Mission</h2>
+        <p class="hint">Click the map to add waypoints (default altitude 20m).</p>
+        <div id="waypoint-list"></div>
+        <div class="button-row">
+          <button id="btn-mission-clear">Clear</button>
+          <button id="btn-mission-upload">Upload</button>
+          <button id="btn-mission-start">Start</button>
+        </div>
+        <div id="mission-status">No mission uploaded.</div>
       </section>
     </aside>
   </main>

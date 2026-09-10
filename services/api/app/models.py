@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -28,6 +28,8 @@ class Vehicle(Base):
     last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     armed: Mapped[bool] = mapped_column(Boolean, default=False)
     flight_mode: Mapped[str] = mapped_column(String, default="UNKNOWN")
+    current_waypoint_seq: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    active_mission_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class TelemetrySample(Base):
@@ -59,6 +61,26 @@ class TelemetrySample(Base):
     satellites_visible: Mapped[int | None] = mapped_column(Integer, nullable=True)
     armed: Mapped[bool] = mapped_column(Boolean, default=False)
     flight_mode: Mapped[str] = mapped_column(String, default="UNKNOWN")
+    current_waypoint_seq: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class Mission(Base):
+    """An uploaded set of waypoints for a vehicle to fly. See
+    docs/adr/0008-mission-protocol.md for the upload protocol and the
+    documented simplification that this phase does not auto-detect
+    mission completion (no COMPLETED status)."""
+
+    __tablename__ = "missions"
+
+    mission_id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    vehicle_id: Mapped[str] = mapped_column(
+        String, ForeignKey("vehicles.vehicle_id"), index=True
+    )
+    waypoints: Mapped[list] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String, default="PENDING")  # PENDING/UPLOADED/ACTIVE/FAILED
+    error: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Command(Base):

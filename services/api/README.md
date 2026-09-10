@@ -9,10 +9,17 @@ gateway, streams live telemetry to UI clients.
   `X-Internal-Token` header matching `UAS_INTERNAL_TOKEN`)
 - `GET /vehicles`, `GET /vehicles/{id}`
 - `GET /vehicles/{id}/telemetry?limit=100` — recent history, oldest first
-- `POST /vehicles/{id}/commands` — `{"type": "ARM"|"DISARM"|"TAKEOFF", "altitude_m": ...}`,
+- `POST /vehicles/{id}/commands` — `{"type": "ARM"|"DISARM"|"TAKEOFF"|"RTL", "altitude_m": ...}`,
   forwards to the gateway and blocks for the result
 - `GET /vehicles/{id}/commands/{command_id}`
-- `WS /ws/telemetry/{id}` — live telemetry stream (JSON messages)
+- `POST /vehicles/{id}/missions` — `{"waypoints": [{"lat":, "lon":, "alt_m":}, ...]}`,
+  uploads the mission to the vehicle via the gateway (Phase 2, see
+  `docs/adr/0008-mission-protocol.md`)
+- `GET /vehicles/{id}/missions`, `GET /vehicles/{id}/missions/{mission_id}`
+- `POST /vehicles/{id}/missions/{mission_id}/start` — sends `MISSION_START`;
+  mission must be `UPLOADED` first
+- `WS /ws/telemetry/{id}` — live telemetry stream (JSON messages, now
+  including `current_waypoint_seq`)
 
 ## Run locally
 

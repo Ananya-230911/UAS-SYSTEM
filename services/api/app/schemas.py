@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class TelemetryIngest(BaseModel):
@@ -20,6 +20,7 @@ class TelemetryIngest(BaseModel):
     satellites_visible: int | None = None
     armed: bool = False
     flight_mode: str = "UNKNOWN"
+    current_waypoint_seq: int | None = None
 
 
 class TelemetryOut(TelemetryIngest):
@@ -34,6 +35,8 @@ class VehicleOut(BaseModel):
     last_seen: datetime
     armed: bool
     flight_mode: str
+    current_waypoint_seq: int | None = None
+    active_mission_id: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -53,5 +56,27 @@ class CommandOut(BaseModel):
     error: str | None = None
     issued_at: datetime
     resolved_at: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class WaypointIn(BaseModel):
+    lat: float
+    lon: float
+    alt_m: float
+
+
+class MissionCreate(BaseModel):
+    waypoints: list[WaypointIn] = Field(min_length=1)
+
+
+class MissionOut(BaseModel):
+    mission_id: str
+    vehicle_id: str
+    waypoints: list[dict]
+    status: str
+    error: str | None = None
+    created_at: datetime
+    started_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)

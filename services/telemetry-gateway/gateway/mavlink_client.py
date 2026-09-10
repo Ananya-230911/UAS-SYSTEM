@@ -4,6 +4,7 @@ pymavlink's socket API is blocking, not asyncio-friendly, so this runs its
 own receive loop on a background thread and exposes thread-safe methods that
 FastAPI's (sync) route handlers call from worker threads.
 """
+import queue
 import threading
 import time
 from dataclasses import dataclass, field
@@ -17,6 +18,14 @@ from .config import settings
 
 
 class CommandTimeout(Exception):
+    pass
+
+
+class MissionUploadTimeout(Exception):
+    pass
+
+
+class MissionUploadRejected(Exception):
     pass
 
 
@@ -37,6 +46,7 @@ class VehicleSample:
     satellites_visible: Optional[int] = None
     armed: bool = False
     flight_mode: str = "UNKNOWN"
+    current_waypoint_seq: Optional[int] = None
     updated: bool = field(default=False, repr=False)
 
 
@@ -47,6 +57,9 @@ class MavlinkGatewayClient:
         self._sample_lock = threading.Lock()
         self._pending_commands: dict = {}
         self._pending_lock = threading.Lock()
+        self._mission_request_queue: "queue.Queue[int]" = queue.Queue()
+        self._mission_ack_event = threading.Event()
+        self._mission_ack_box: dict = {}
         self._stop = threading.Event()
         self._recv_thread: Optional[threading.Thread] = None
         self._poster_thread: Optional[threading.Thread] = None
@@ -103,6 +116,13 @@ class MavlinkGatewayClient:
         if mtype == "COMMAND_ACK":
             self._resolve_command(msg.command, msg.result)
             return
+        if mtype == "MISSION_REQUEST_INT":
+            self._mission_request_queue.put(msg.seq)
+            return
+        if mtype == "MISSION_ACK":
+            self._mission_ack_box["type"] = msg.type
+            self._mission_ack_event.set()
+            return
 
         with self._sample_lock:
             if mtype == "HEARTBEAT":
@@ -140,6 +160,9 @@ class MavlinkGatewayClient:
                 if msg.vel != 65535:
                     self._sample.groundspeed_ms = msg.vel / 100.0
                 self._sample.updated = True
+            elif mtype == "MISSION_CURRENT":
+                self._sample.current_waypoint_seq = msg.seq
+                self._sample.updated = True
 
     def _resolve_command(self, command_id: int, result: int) -> None:
         with self._pending_lock:
@@ -170,6 +193,56 @@ class MavlinkGatewayClient:
         if not acked:
             raise CommandTimeout(f"no COMMAND_ACK for command {command_id} within {timeout}s")
         return box["result"]
+
+    def upload_mission(self, waypoints: list, timeout: float = 10.0) -> None:
+        """Upload a mission via the standard MAVLink handshake (see
+        docs/adr/0008-mission-protocol.md): send MISSION_COUNT, answer each
+        MISSION_REQUEST_INT with the matching MISSION_ITEM_INT in order,
+        then wait for the final MISSION_ACK. Raises MissionUploadTimeout or
+        MissionUploadRejected on failure; returns normally on acceptance.
+        """
+        self._mission_ack_event.clear()
+        self._mission_ack_box.clear()
+        while not self._mission_request_queue.empty():
+            self._mission_request_queue.get_nowait()
+
+        target_system = self._conn.target_system or 1
+        target_component = self._conn.target_component or 1
+        deadline = time.time() + timeout
+
+        self._conn.mav.mission_count_send(target_system, target_component, len(waypoints))
+        served = 0
+        while served < len(waypoints):
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                raise MissionUploadTimeout(
+                    f"vehicle did not request all {len(waypoints)} mission items in time"
+                )
+            try:
+                seq = self._mission_request_queue.get(timeout=remaining)
+            except queue.Empty:
+                raise MissionUploadTimeout(
+                    f"vehicle did not request all {len(waypoints)} mission items in time"
+                )
+            wp = waypoints[seq]
+            self._conn.mav.mission_item_int_send(
+                target_system, target_component, seq,
+                mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT,
+                mavutil.mavlink.MAV_CMD_NAV_WAYPOINT,
+                1 if seq == 0 else 0,  # current
+                1,  # autocontinue
+                0.0, 0.0, 0.0, 0.0,
+                int(wp["lat"] * 1e7), int(wp["lon"] * 1e7), float(wp["alt_m"]),
+            )
+            served += 1
+
+        acked = self._mission_ack_event.wait(timeout=max(0.0, deadline - time.time()))
+        if not acked:
+            raise MissionUploadTimeout("no MISSION_ACK received within timeout")
+        if self._mission_ack_box.get("type") != mavutil.mavlink.MAV_MISSION_ACCEPTED:
+            raise MissionUploadRejected(
+                f"vehicle rejected mission: MAV_MISSION_RESULT={self._mission_ack_box.get('type')}"
+            )
 
     def snapshot(self) -> Optional[dict]:
         """Return the latest sample and clear the dirty flag, or None if

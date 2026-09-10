@@ -6,12 +6,17 @@ See `docs/adr/0002-telemetry-protocol.md` and `docs/adr/0006-internal-messaging.
 
 ## Responsibilities
 - Binds a MAVLink UDP endpoint and receives HEARTBEAT/GLOBAL_POSITION_INT/
-  ATTITUDE/SYS_STATUS/GPS_RAW_INT from the vehicle.
+  ATTITUDE/SYS_STATUS/GPS_RAW_INT/MISSION_CURRENT from the vehicle.
 - Normalizes the latest state into a flat sample and `POST`s it to the API's
   `POST /internal/telemetry` on a fixed interval (only when something changed).
-- Exposes `POST /command` (`{"type": "ARM"|"DISARM"|"TAKEOFF", "altitude_m": ...}`)
+- Exposes `POST /command` (`{"type": "ARM"|"DISARM"|"TAKEOFF"|"RTL"|"MISSION_START", "altitude_m": ...}`)
   which the API calls; translates it to a MAVLink `COMMAND_LONG` and blocks
   for the `COMMAND_ACK`.
+- Exposes `POST /mission` (`{"waypoints": [{"lat":, "lon":, "alt_m":}, ...]}`)
+  which the API calls to upload a mission; runs the full MAVLink mission
+  handshake (`MISSION_COUNT` → `MISSION_REQUEST_INT`/`MISSION_ITEM_INT` →
+  `MISSION_ACK`) and blocks for the result. See
+  `docs/adr/0008-mission-protocol.md`.
 
 ## Run locally
 

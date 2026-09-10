@@ -21,10 +21,13 @@ class FakeResponse:
 
 
 class FakeAsyncClient:
-    """Stands in for httpx.AsyncClient so command tests don't need a real
-    telemetry-gateway process running."""
+    """Stands in for httpx.AsyncClient so command/mission tests don't need a
+    real telemetry-gateway process running. Branches on the URL path since
+    /command and /mission have different success-body shapes."""
 
     last_request = None
+    mission_response = FakeResponse(200, {"accepted": True, "count": 1})
+    command_response = FakeResponse(200, {"acked": True, "mav_result": 0})
 
     def __init__(self, *args, **kwargs):
         pass
@@ -37,7 +40,9 @@ class FakeAsyncClient:
 
     async def post(self, url, json=None):
         FakeAsyncClient.last_request = (url, json)
-        return FakeResponse(200, {"acked": True, "mav_result": 0})
+        if url.endswith("/mission"):
+            return FakeAsyncClient.mission_response
+        return FakeAsyncClient.command_response
 
 
 def test_health(client):
@@ -94,3 +99,77 @@ def test_create_command_calls_gateway_and_records_result(client, monkeypatch):
     fetched = client.get(f"/vehicles/sim-1/commands/{body['command_id']}")
     assert fetched.status_code == 200
     assert fetched.json()["command_type"] == "ARM"
+
+
+def test_create_mission_rejects_empty_waypoints(client):
+    resp = client.post("/vehicles/sim-1/missions", json={"waypoints": []})
+    assert resp.status_code == 422
+
+
+def test_create_mission_uploads_via_gateway_and_starts(client, monkeypatch):
+    monkeypatch.setattr("app.main.httpx.AsyncClient", FakeAsyncClient)
+    waypoints = [{"lat": 1.0, "lon": 2.0, "alt_m": 10.0}, {"lat": 3.0, "lon": 4.0, "alt_m": 20.0}]
+
+    create_resp = client.post("/vehicles/sim-1/missions", json={"waypoints": waypoints})
+    assert create_resp.status_code == 200
+    mission = create_resp.json()
+    assert mission["status"] == "UPLOADED"
+    assert mission["waypoints"] == waypoints
+    assert FakeAsyncClient.last_request[0].endswith("/mission")
+
+    fetched = client.get(f"/vehicles/sim-1/missions/{mission['mission_id']}")
+    assert fetched.status_code == 200
+    assert fetched.json()["status"] == "UPLOADED"
+
+    listed = client.get("/vehicles/sim-1/missions")
+    assert listed.status_code == 200
+    assert any(m["mission_id"] == mission["mission_id"] for m in listed.json())
+
+    start_resp = client.post(f"/vehicles/sim-1/missions/{mission['mission_id']}/start")
+    assert start_resp.status_code == 200
+    started = start_resp.json()
+    assert started["status"] == "ACTIVE"
+    assert started["started_at"] is not None
+    assert FakeAsyncClient.last_request[1] == {"type": "MISSION_START", "altitude_m": None}
+
+    vehicle = client.get("/vehicles/sim-1").json()
+    assert vehicle["active_mission_id"] == mission["mission_id"]
+
+
+def test_mission_upload_failure_is_recorded(client, monkeypatch):
+    class RejectingClient(FakeAsyncClient):
+        async def post(self, url, json=None):
+            FakeAsyncClient.last_request = (url, json)
+            return FakeResponse(422, "vehicle rejected mission")
+
+    monkeypatch.setattr("app.main.httpx.AsyncClient", RejectingClient)
+
+    resp = client.post(
+        "/vehicles/sim-1/missions",
+        json={"waypoints": [{"lat": 1.0, "lon": 2.0, "alt_m": 10.0}]},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "FAILED"
+    assert body["error"] is not None
+
+
+def test_start_mission_requires_uploaded_status(client, monkeypatch):
+    monkeypatch.setattr("app.main.httpx.AsyncClient", FakeAsyncClient)
+    resp = client.post(
+        "/vehicles/sim-1/missions", json={"waypoints": [{"lat": 1.0, "lon": 2.0, "alt_m": 10.0}]}
+    )
+    mission_id = resp.json()["mission_id"]
+
+    # Start it once (succeeds, moves to ACTIVE)...
+    first_start = client.post(f"/vehicles/sim-1/missions/{mission_id}/start")
+    assert first_start.status_code == 200
+
+    # ...starting an already-ACTIVE mission is rejected.
+    second_start = client.post(f"/vehicles/sim-1/missions/{mission_id}/start")
+    assert second_start.status_code == 400
+
+
+def test_get_mission_404_for_unknown_id(client):
+    resp = client.get("/vehicles/sim-1/missions/does-not-exist")
+    assert resp.status_code == 404

@@ -97,3 +97,10 @@ def test_safe_recv_match_passes_through_normal_result():
     client._conn.recv_match.return_value = sentinel
 
     assert client._safe_recv_match(timeout=0.5) is sentinel
+
+
+def test_mission_current_updates_sample():
+    client = MavlinkGatewayClient()
+    client._handle_message(_msg("MISSION_CURRENT", seq=2))
+    sample = client.snapshot()
+    assert sample["current_waypoint_seq"] == 2

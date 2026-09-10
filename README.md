@@ -3,15 +3,18 @@
 Unmanned Aerial System — ground control, telemetry, and mission management
 software stack.
 
-## Status: Phase 1 (foundation) implemented
+## Status: Phase 1 (foundation) + Phase 2 (mission planning) implemented
 
-See [`docs/PHASE_1_PLAN.md`](docs/PHASE_1_PLAN.md) for the full plan and
-[`docs/adr/`](docs/adr/) for the architecture decisions behind it.
+See [`docs/PHASE_1_PLAN.md`](docs/PHASE_1_PLAN.md) for the Phase 1 plan and
+[`docs/adr/`](docs/adr/) for the architecture decisions behind both phases
+(Phase 2's mission protocol decision is ADR-0008).
 
 Phase 1 delivers a working vertical slice end-to-end against a simulated
 vehicle: telemetry flows from a simulator through a MAVLink gateway into a
 backend API and a live map UI, and arm/takeoff commands flow back the other
-way.
+way. Phase 2 adds waypoint missions (upload, start, live progress) and
+return-to-launch, using the real MAVLink mission protocol so the simulator
+can be swapped for a real autopilot later without a protocol change.
 
 ```
 simulation/sitl  --MAVLink/UDP-->  telemetry-gateway  --HTTP-->  api  <--WS/REST-->  gcs-web
@@ -25,7 +28,8 @@ simulation/sitl  --MAVLink/UDP-->  telemetry-gateway  --HTTP-->  api  <--WS/REST
 ```
 
 Then open `http://localhost:8080/?api=http://localhost:8000&vehicle=sim-1`
-to see the simulated vehicle on the map, arm it, and command takeoff.
+to see the simulated vehicle on the map, arm it, command takeoff, click the
+map to add waypoints and fly a mission, or send it home with RTL.
 
 ### Quick start on Windows (PowerShell)
 
@@ -80,8 +84,8 @@ This is the same check CI runs on every push.
 | Path | Purpose |
 |---|---|
 | `docs/PHASE_1_PLAN.md` | Phase 1 plan |
-| `docs/adr/` | Architecture decision records |
-| `simulation/sitl/` | Phase 1 MAVLink simulator (stand-in for PX4/ArduPilot SITL — see ADR-0001) |
+| `docs/adr/` | Architecture decision records (ADR-0008 covers Phase 2's mission protocol) |
+| `simulation/sitl/` | Phase 1/2 MAVLink simulator (stand-in for PX4/ArduPilot SITL — see ADR-0001) |
 | `services/telemetry-gateway/` | MAVLink ↔ internal HTTP bridge |
 | `services/api/` | REST + WebSocket backend, persistence |
 | `apps/gcs-web/` | Minimal ground control station UI |

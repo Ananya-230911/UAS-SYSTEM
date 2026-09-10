@@ -5,7 +5,12 @@ from pydantic import BaseModel
 
 from .commands import SUPPORTED_COMMAND_TYPES, UnsupportedCommand, build_command
 from .config import settings
-from .mavlink_client import CommandTimeout, gateway_client
+from .mavlink_client import (
+    CommandTimeout,
+    MissionUploadRejected,
+    MissionUploadTimeout,
+    gateway_client,
+)
 
 
 @asynccontextmanager
@@ -26,6 +31,16 @@ app = FastAPI(title="UAS-SYSTEM Telemetry Gateway", version="0.1.0", lifespan=li
 class CommandRequest(BaseModel):
     type: str
     altitude_m: float | None = None
+
+
+class WaypointRequest(BaseModel):
+    lat: float
+    lon: float
+    alt_m: float
+
+
+class MissionUploadRequest(BaseModel):
+    waypoints: list[WaypointRequest]
 
 
 @app.get("/health")
@@ -55,3 +70,21 @@ def send_command(req: CommandRequest) -> dict:
         raise HTTPException(status_code=504, detail=str(exc))
 
     return {"mav_result": result, "acked": result == 0}
+
+
+@app.post("/mission")
+def upload_mission(req: MissionUploadRequest) -> dict:
+    if not gateway_client.is_connected():
+        raise HTTPException(status_code=503, detail="no vehicle connected (no HEARTBEAT yet)")
+    if not req.waypoints:
+        raise HTTPException(status_code=400, detail="waypoints must be non-empty")
+
+    waypoints = [wp.model_dump() for wp in req.waypoints]
+    try:
+        gateway_client.upload_mission(waypoints)
+    except MissionUploadTimeout as exc:
+        raise HTTPException(status_code=504, detail=str(exc))
+    except MissionUploadRejected as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    return {"accepted": True, "count": len(waypoints)}

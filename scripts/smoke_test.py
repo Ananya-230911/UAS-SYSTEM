@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""End-to-end Phase 1 smoke test.
+"""End-to-end Phase 1/2 smoke test.
 
 Starts api + telemetry-gateway + sitl as subprocesses, waits for telemetry to
 flow, arms the simulated vehicle, commands takeoff, and asserts altitude
-increases. This is the CI gate for "the vertical slice still works" (see
-docs/PHASE_1_PLAN.md, section 8).
+increases (Phase 1). Then uploads and starts a two-waypoint mission and
+asserts the vehicle actually flies it (current_waypoint_seq advances), and
+commands RTL and asserts the vehicle flies home and disarms itself (Phase 2,
+see docs/adr/0008-mission-protocol.md). This is the CI gate for "the
+vertical slice still works" (see docs/PHASE_1_PLAN.md, section 8).
 
 Assumes the three services' dependencies are already installed (either in
 the active interpreter, or point PYTHON at a venv's python3).
@@ -142,6 +145,43 @@ def main():
         wait_for(climbed, 20, "relative_alt_m > 2.0m after takeoff")
         final = http_get(f"{API_URL}/vehicles/{VEHICLE_ID}/telemetry?limit=1")[0]
         print(f"Altitude climbing: relative_alt_m={final['relative_alt_m']:.1f}")
+
+        print("Uploading a 2-waypoint mission close to home...")
+        home_lat, home_lon = 37.4275, -122.1697
+        waypoints = [
+            {"lat": home_lat + 0.0003, "lon": home_lon, "alt_m": 25.0},
+            {"lat": home_lat + 0.0003, "lon": home_lon + 0.0004, "alt_m": 25.0},
+        ]
+        mission = http_post(f"{API_URL}/vehicles/{VEHICLE_ID}/missions", {"waypoints": waypoints})
+        assert mission["status"] == "UPLOADED", f"mission upload not accepted: {mission}"
+        print(f"  -> mission {mission['mission_id']} UPLOADED")
+
+        print("Starting mission...")
+        started = http_post(f"{API_URL}/vehicles/{VEHICLE_ID}/missions/{mission['mission_id']}/start", {})
+        assert started["status"] == "ACTIVE", f"mission not started: {started}"
+        print(f"  -> mission ACTIVE")
+
+        print("Waiting for the vehicle to fly the mission to its last waypoint...")
+        wait_for(
+            lambda: http_get(f"{API_URL}/vehicles/{VEHICLE_ID}").get("current_waypoint_seq")
+            == len(waypoints) - 1,
+            30,
+            f"current_waypoint_seq == {len(waypoints) - 1} (last waypoint)",
+        )
+        print("  -> reached the last waypoint.")
+
+        print("Sending RTL command...")
+        rtl_result = http_post(f"{API_URL}/vehicles/{VEHICLE_ID}/commands", {"type": "RTL"})
+        assert rtl_result["status"] == "ACKED", f"RTL not acked: {rtl_result}"
+        print(f"  -> {rtl_result}")
+
+        print("Waiting for the vehicle to fly home, land, and disarm...")
+        wait_for(
+            lambda: http_get(f"{API_URL}/vehicles/{VEHICLE_ID}").get("armed") is False,
+            30,
+            "vehicle to disarm after RTL",
+        )
+        print("  -> vehicle disarmed (RTL complete).")
 
         print("\nSMOKE TEST PASSED\n")
         return 0

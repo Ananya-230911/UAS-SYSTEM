@@ -140,3 +140,46 @@ main {
   color: #2563eb;
   text-shadow: 0 0 2px white, 0 0 2px white;
 }
+
+.hint {
+  font-size: 0.75rem;
+  color: #64748b;
+  margin: 0 0 0.5rem;
+}
+
+#waypoint-list {
+  font-size: 0.8rem;
+  margin-bottom: 0.5rem;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+#waypoint-list div {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.2rem 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+#waypoint-list button {
+  border: none;
+  background: none;
+  color: #dc2626;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+#mission-status {
+  font-size: 0.8rem;
+  color: #475569;
+}
+
+.waypoint-marker {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #f59e0b;
+  border: 2px solid white;
+  box-shadow: 0 0 2px rgba(0,0,0,0.4);
+}

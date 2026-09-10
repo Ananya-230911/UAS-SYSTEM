@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""Lightweight MAVLink SITL stand-in for UAS-SYSTEM Phase 1.
+"""Lightweight MAVLink SITL stand-in for UAS-SYSTEM Phase 1/2.
 
 This is NOT PX4/ArduPilot SITL. See docs/adr/0001-autopilot-simulator.md for
 why: the real PX4 build toolchain (Gazebo, ROS, the firmware source tree)
 isn't available in the sandbox this was built in. This module speaks real
 MAVLink v2 over UDP and implements enough of the protocol -- HEARTBEAT,
 GLOBAL_POSITION_INT, ATTITUDE, SYS_STATUS, GPS_RAW_INT, COMMAND_LONG /
-COMMAND_ACK, arm/disarm, and a simple takeoff-then-loiter flight model -- to
-exercise the whole Phase 1 pipeline end to end. Everything downstream only
-depends on the MAVLink wire protocol, so swapping this for real SITL later
-does not require touching the gateway, API, or UI.
+COMMAND_ACK, arm/disarm/takeoff, the mission upload handshake (MISSION_COUNT /
+MISSION_REQUEST_INT / MISSION_ITEM_INT / MISSION_ACK, see
+docs/adr/0008-mission-protocol.md), waypoint-following, and return-to-launch
+-- to exercise the whole Phase 1/2 pipeline end to end. Everything downstream
+only depends on the MAVLink wire protocol, so swapping this for real SITL
+later does not require touching the gateway, API, or UI.
 
 Usage:
     python3 sim.py --target-host 127.0.0.1 --target-port 14550
@@ -26,17 +28,43 @@ COMPONENT_ID = mavutil.mavlink.MAV_COMP_ID_AUTOPILOT1
 EARTH_RADIUS_M = 6371000.0
 
 # Application-level flight modes. Real PX4/ArduPilot mode tables are far
-# richer than this; this is intentionally the minimal set Phase 1 needs.
-MODE_CODES = {"STANDBY": 0, "ARMED": 1, "TAKEOFF": 2, "LOITER": 3, "LANDING": 4}
+# richer than this; this is intentionally the minimal set Phase 1/2 needs.
+# This table and gateway/commands.py's MODE_NAMES are two ends of the same
+# wire contract (HEARTBEAT.custom_mode) -- keep them in sync by hand; they
+# live in separate processes/services on purpose (see ADR-0006) so there's
+# no shared module to enforce it automatically.
+MODE_CODES = {
+    "STANDBY": 0,
+    "ARMED": 1,
+    "TAKEOFF": 2,
+    "LOITER": 3,
+    "LANDING": 4,
+    "MISSION": 5,
+    "RTL": 6,
+}
 
 MAV_CMD_COMPONENT_ARM_DISARM = 400
 MAV_CMD_NAV_TAKEOFF = 22
+MAV_CMD_NAV_RETURN_TO_LAUNCH = 20
+MAV_CMD_MISSION_START = 300
 MAV_RESULT_ACCEPTED = 0
+MAV_RESULT_UNSUPPORTED = 3
+MAV_RESULT_FAILED = 4
+
+WAYPOINT_SPEED_MS = 8.0
+WAYPOINT_ARRIVAL_RADIUS_M = 3.0
+WAYPOINT_ARRIVAL_ALT_TOLERANCE_M = 1.0
+RTL_ALTITUDE_M = 20.0
+RTL_ARRIVAL_RADIUS_M = 2.0
+RTL_LANDED_ALT_TOLERANCE_M = 0.5
+CLIMB_DESCENT_RATE_MS = 2.0
 
 
 class VehicleState:
-    """Minimal flight model: arm, climb to a target altitude, then loiter
-    in a circle around home. Battery drains slowly while armed."""
+    """Flight model with three regimes, checked in this priority order:
+    RTL > active mission > the original Phase 1 arm-and-loiter behavior.
+    Battery drains slowly while armed, in all regimes.
+    """
 
     def __init__(self, home_lat: float, home_lon: float):
         self.home_lat = home_lat
@@ -58,46 +86,170 @@ class VehicleState:
         self.flying = False
         self._t = 0.0
 
+        # Phase 2: mission state. mission_waypoints holds the *accepted*
+        # mission (list of {"lat", "lon", "alt_m"}); the upload-in-progress
+        # buffer is kept separate (see handle_mission_count/_item below) so
+        # a partial/failed upload never clobbers a previously accepted one.
+        self.mission_waypoints: list = []
+        self.mission_active = False
+        self.mission_current_seq = 0
+        self.rtl_active = False
+        self._rtl_over_home = False
+        self._mission_upload_buffer: list = []
+        self._mission_upload_expected_count = 0
+
+    def _latlon_offset_m(self, lat: float, lon: float) -> tuple:
+        """(north_m, east_m) offset of (lat, lon) from home, flat-earth
+        approximation -- adequate at the sub-kilometer scale this simulator
+        operates at, consistent with the original loiter math below."""
+        north_m = math.radians(lat - self.home_lat) * EARTH_RADIUS_M
+        east_m = math.radians(lon - self.home_lon) * EARTH_RADIUS_M * math.cos(
+            math.radians(self.home_lat)
+        )
+        return north_m, east_m
+
+    def _offset_m_to_latlon(self, north_m: float, east_m: float) -> tuple:
+        lat = self.home_lat + math.degrees(north_m / EARTH_RADIUS_M)
+        lon = self.home_lon + math.degrees(
+            east_m / (EARTH_RADIUS_M * math.cos(math.radians(self.home_lat)))
+        )
+        return lat, lon
+
+    def _step_toward_target(
+        self, dt: float, target_lat: float, target_lon: float, target_alt_m: float,
+        speed_ms: float,
+    ) -> tuple:
+        """Move at most speed_ms*dt meters toward (target_lat, target_lon),
+        and climb/descend at most CLIMB_DESCENT_RATE_MS*dt meters toward
+        target_alt_m. Returns (remaining_horizontal_m, remaining_alt_m)
+        *after* the move, so callers can decide "have we arrived yet"."""
+        cur_n, cur_e = self._latlon_offset_m(self.lat, self.lon)
+        tgt_n, tgt_e = self._latlon_offset_m(target_lat, target_lon)
+        dn, de = tgt_n - cur_n, tgt_e - cur_e
+        horiz_dist = math.hypot(dn, de)
+        step = min(speed_ms * dt, horiz_dist)
+
+        if horiz_dist > 1e-6:
+            bearing = math.atan2(de, dn)  # radians, 0 = north, clockwise
+            new_n = cur_n + step * math.cos(bearing)
+            new_e = cur_e + step * math.sin(bearing)
+            self.lat, self.lon = self._offset_m_to_latlon(new_n, new_e)
+            self.heading_deg = math.degrees(bearing) % 360
+            self.yaw = bearing
+            self.roll = math.radians(8.0) if step > 0 else 0.0
+            self.pitch = math.radians(5.0) if step > 0 else 0.0
+
+        self.groundspeed_ms = (step / dt) if dt > 0 else 0.0
+
+        alt_diff = target_alt_m - self.relative_alt_m
+        max_alt_step = CLIMB_DESCENT_RATE_MS * dt
+        if abs(alt_diff) > max_alt_step:
+            self.relative_alt_m += max_alt_step * (1 if alt_diff > 0 else -1)
+        else:
+            self.relative_alt_m = target_alt_m
+        self.alt_m = self.relative_alt_m
+
+        return horiz_dist - step, abs(target_alt_m - self.relative_alt_m)
+
     def step(self, dt: float) -> None:
         self._t += dt
         if self.armed and self.battery_pct > 0:
             self.battery_pct = max(0.0, self.battery_pct - 0.01 * dt)
             self.battery_voltage_mv = int(9000 + 36 * self.battery_pct)
 
-        if self.flying:
-            climb_rate_ms = 2.0
-            if self.relative_alt_m < self.target_alt_m:
-                self.relative_alt_m = min(
-                    self.target_alt_m, self.relative_alt_m + climb_rate_ms * dt
-                )
-                self.mode = "TAKEOFF"
-            else:
-                self.mode = "LOITER"
-            self.alt_m = self.relative_alt_m
-
-            radius_m = 40.0
-            angular_speed = 0.15
-            angle = self._t * angular_speed
-            self.groundspeed_ms = radius_m * angular_speed
-            self.heading_deg = (math.degrees(angle) + 90) % 360
-            self.yaw = math.radians(self.heading_deg)
-            self.roll = math.radians(15 * math.sin(angle))
-            self.pitch = math.radians(5)
-
-            dlat = (radius_m * math.cos(angle)) / EARTH_RADIUS_M
-            dlon = (radius_m * math.sin(angle)) / (
-                EARTH_RADIUS_M * math.cos(math.radians(self.home_lat))
-            )
-            self.lat = self.home_lat + math.degrees(dlat)
-            self.lon = self.home_lon + math.degrees(dlon)
+        if self.rtl_active:
+            self._step_rtl(dt)
+        elif self.mission_active:
+            self._step_mission(dt)
+        elif self.flying:
+            self._step_loiter(dt)
         else:
             self.groundspeed_ms = 0.0
             self.mode = "ARMED" if self.armed else "STANDBY"
+
+    def _step_loiter(self, dt: float) -> None:
+        """Original Phase 1 behavior, unchanged: climb to target_alt_m,
+        then circle home at a fixed radius. Kept as its own method so
+        Phase 1's arm/takeoff path and its tests are untouched by Phase 2."""
+        if self.relative_alt_m < self.target_alt_m:
+            self.relative_alt_m = min(
+                self.target_alt_m, self.relative_alt_m + CLIMB_DESCENT_RATE_MS * dt
+            )
+            self.mode = "TAKEOFF"
+        else:
+            self.mode = "LOITER"
+        self.alt_m = self.relative_alt_m
+
+        radius_m = 40.0
+        angular_speed = 0.15
+        angle = self._t * angular_speed
+        self.groundspeed_ms = radius_m * angular_speed
+        self.heading_deg = (math.degrees(angle) + 90) % 360
+        self.yaw = math.radians(self.heading_deg)
+        self.roll = math.radians(15 * math.sin(angle))
+        self.pitch = math.radians(5)
+
+        dlat = (radius_m * math.cos(angle)) / EARTH_RADIUS_M
+        dlon = (radius_m * math.sin(angle)) / (
+            EARTH_RADIUS_M * math.cos(math.radians(self.home_lat))
+        )
+        self.lat = self.home_lat + math.degrees(dlat)
+        self.lon = self.home_lon + math.degrees(dlon)
+
+    def _step_mission(self, dt: float) -> None:
+        self.mode = "MISSION"
+        wp = self.mission_waypoints[self.mission_current_seq]
+        remaining_horiz, remaining_alt = self._step_toward_target(
+            dt, wp["lat"], wp["lon"], wp["alt_m"], WAYPOINT_SPEED_MS
+        )
+        if (
+            remaining_horiz < WAYPOINT_ARRIVAL_RADIUS_M
+            and remaining_alt < WAYPOINT_ARRIVAL_ALT_TOLERANCE_M
+        ):
+            if self.mission_current_seq + 1 < len(self.mission_waypoints):
+                self.mission_current_seq += 1
+            else:
+                self.mission_active = False
+                self.mode = "LOITER"
+
+    def _step_rtl(self, dt: float) -> None:
+        if not self._rtl_over_home:
+            self.mode = "RTL"
+            remaining_horiz, _ = self._step_toward_target(
+                dt, self.home_lat, self.home_lon,
+                max(self.relative_alt_m, RTL_ALTITUDE_M), WAYPOINT_SPEED_MS,
+            )
+            if remaining_horiz < RTL_ARRIVAL_RADIUS_M:
+                self._rtl_over_home = True
+        else:
+            self.mode = "LANDING"
+            _, remaining_alt = self._step_toward_target(
+                dt, self.home_lat, self.home_lon, 0.0, WAYPOINT_SPEED_MS
+            )
+            if remaining_alt < RTL_LANDED_ALT_TOLERANCE_M:
+                self.disarm()
 
     def start_takeoff(self, target_alt_m: float) -> None:
         self.target_alt_m = target_alt_m
         self.flying = True
         self.mode = "TAKEOFF"
+
+    def start_mission(self) -> None:
+        if not self.mission_waypoints:
+            raise ValueError("no mission uploaded")
+        self.mission_active = True
+        self.rtl_active = False
+        self._rtl_over_home = False
+        self.mission_current_seq = 0
+        self.flying = True
+        self.mode = "MISSION"
+
+    def start_rtl(self) -> None:
+        self.mission_active = False
+        self.rtl_active = True
+        self._rtl_over_home = False
+        self.flying = True
+        self.mode = "RTL"
 
     def arm(self) -> None:
         self.armed = True
@@ -106,10 +258,49 @@ class VehicleState:
     def disarm(self) -> None:
         self.armed = False
         self.flying = False
+        self.mission_active = False
+        self.rtl_active = False
+        self._rtl_over_home = False
         self.relative_alt_m = 0.0
         self.alt_m = 0.0
         self.target_alt_m = 0.0
         self.mode = "STANDBY"
+
+    def handle_mission_count(self, conn, msg) -> None:
+        """MISSION_COUNT received: start (or restart) an upload. Request
+        item 0, or ack immediately for an empty mission."""
+        self._mission_upload_buffer = [None] * msg.count
+        self._mission_upload_expected_count = msg.count
+        if msg.count == 0:
+            conn.mav.mission_ack_send(
+                msg.get_srcSystem(), msg.get_srcComponent(),
+                mavutil.mavlink.MAV_MISSION_ACCEPTED,
+            )
+            self.mission_waypoints = []
+            return
+        conn.mav.mission_request_int_send(msg.get_srcSystem(), msg.get_srcComponent(), 0)
+
+    def handle_mission_item(self, conn, msg) -> None:
+        """MISSION_ITEM_INT received: store it, request the next one, or
+        ack once the last expected item has arrived."""
+        if 0 <= msg.seq < len(self._mission_upload_buffer):
+            self._mission_upload_buffer[msg.seq] = {
+                "lat": msg.x / 1e7,
+                "lon": msg.y / 1e7,
+                "alt_m": msg.z,
+            }
+        next_seq = msg.seq + 1
+        if next_seq < self._mission_upload_expected_count:
+            conn.mav.mission_request_int_send(
+                msg.get_srcSystem(), msg.get_srcComponent(), next_seq
+            )
+        else:
+            conn.mav.mission_ack_send(
+                msg.get_srcSystem(), msg.get_srcComponent(),
+                mavutil.mavlink.MAV_MISSION_ACCEPTED,
+            )
+            self.mission_waypoints = self._mission_upload_buffer
+            self._mission_upload_buffer = []
 
 
 def send_heartbeat(conn, state: VehicleState) -> None:
@@ -154,6 +345,8 @@ def send_telemetry(conn, state: VehicleState) -> None:
         int(state.heading_deg * 100),
         10,
     )
+    if state.mission_active:
+        conn.mav.mission_current_send(state.mission_current_seq)
 
 
 def handle_command(conn, state: VehicleState, msg) -> None:
@@ -165,12 +358,25 @@ def handle_command(conn, state: VehicleState, msg) -> None:
             state.disarm()
     elif msg.command == MAV_CMD_NAV_TAKEOFF:
         if not state.armed:
-            result = 4  # MAV_RESULT_FAILED (not armed)
+            result = MAV_RESULT_FAILED
         else:
             target_alt = msg.param7 if msg.param7 > 0 else 20.0
             state.start_takeoff(target_alt)
+    elif msg.command == MAV_CMD_MISSION_START:
+        if not state.armed:
+            result = MAV_RESULT_FAILED
+        else:
+            try:
+                state.start_mission()
+            except ValueError:
+                result = MAV_RESULT_FAILED
+    elif msg.command == MAV_CMD_NAV_RETURN_TO_LAUNCH:
+        if not state.armed:
+            result = MAV_RESULT_FAILED
+        else:
+            state.start_rtl()
     else:
-        result = 3  # MAV_RESULT_UNSUPPORTED
+        result = MAV_RESULT_UNSUPPORTED
 
     conn.mav.command_ack_send(msg.command, result)
 
@@ -217,6 +423,18 @@ def safe_recv_match(conn):
         return None
 
 
+def dispatch_message(conn, state: VehicleState, msg) -> None:
+    mtype = msg.get_type()
+    if mtype == "COMMAND_LONG":
+        print(f"[sim] COMMAND_LONG command={msg.command} param1={msg.param1} param7={msg.param7}")
+        handle_command(conn, state, msg)
+    elif mtype == "MISSION_COUNT":
+        print(f"[sim] MISSION_COUNT count={msg.count}")
+        state.handle_mission_count(conn, msg)
+    elif mtype == "MISSION_ITEM_INT":
+        state.handle_mission_item(conn, msg)
+
+
 def run(target_host: str, target_port: int, home_lat: float, home_lon: float) -> None:
     conn = mavutil.mavlink_connection(
         f"udpout:{target_host}:{target_port}",
@@ -233,9 +451,8 @@ def run(target_host: str, target_port: int, home_lat: float, home_lon: float) ->
         while True:
             now = time.time()
             msg = safe_recv_match(conn)
-            if msg is not None and msg.get_type() == "COMMAND_LONG":
-                print(f"[sim] COMMAND_LONG command={msg.command} param1={msg.param1} param7={msg.param7}")
-                handle_command(conn, state, msg)
+            if msg is not None:
+                dispatch_message(conn, state, msg)
 
             if now - last_heartbeat >= 1.0:
                 send_heartbeat(conn, state)

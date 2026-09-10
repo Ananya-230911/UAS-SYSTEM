@@ -8,8 +8,16 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .db import get_session, init_db
-from .models import Command, EventLogEntry, TelemetrySample, Vehicle
-from .schemas import CommandCreate, CommandOut, TelemetryIngest, TelemetryOut, VehicleOut
+from .models import Command, EventLogEntry, Mission, TelemetrySample, Vehicle
+from .schemas import (
+    CommandCreate,
+    CommandOut,
+    MissionCreate,
+    MissionOut,
+    TelemetryIngest,
+    TelemetryOut,
+    VehicleOut,
+)
 from .ws_manager import ws_manager
 
 
@@ -63,6 +71,7 @@ async def ingest_telemetry(
     vehicle.last_seen = now
     vehicle.armed = sample.armed
     vehicle.flight_mode = sample.flight_mode
+    vehicle.current_waypoint_seq = sample.current_waypoint_seq
     if prev_armed != sample.armed:
         session.add(
             EventLogEntry(
@@ -111,6 +120,33 @@ def get_telemetry(
     return list(reversed(rows))
 
 
+async def _dispatch_gateway_command(command_type: str, altitude_m: float | None = None) -> dict:
+    """POST /command to the gateway and normalize the outcome into
+    {"status": "ACKED"|"FAILED", "mav_result": int|None, "error": str|None}.
+    Shared by create_command() and start_mission() so both go through one
+    place for gateway-call error handling."""
+    try:
+        async with httpx.AsyncClient(timeout=settings.command_timeout_s) as client:
+            resp = await client.post(
+                f"{settings.gateway_base_url}/command",
+                json={"type": command_type, "altitude_m": altitude_m},
+            )
+        if resp.status_code == 200:
+            body = resp.json()
+            return {
+                "status": "ACKED" if body.get("acked") else "FAILED",
+                "mav_result": body.get("mav_result"),
+                "error": None,
+            }
+        return {
+            "status": "FAILED",
+            "mav_result": None,
+            "error": f"gateway returned {resp.status_code}: {resp.text}",
+        }
+    except httpx.HTTPError as exc:
+        return {"status": "FAILED", "mav_result": None, "error": str(exc)}
+
+
 @app.post("/vehicles/{vehicle_id}/commands", response_model=CommandOut)
 async def create_command(
     vehicle_id: str, req: CommandCreate, session: Session = Depends(db_session)
@@ -125,22 +161,10 @@ async def create_command(
     session.commit()
     session.refresh(command)
 
-    try:
-        async with httpx.AsyncClient(timeout=settings.command_timeout_s) as client:
-            resp = await client.post(
-                f"{settings.gateway_base_url}/command",
-                json={"type": req.type, "altitude_m": req.altitude_m},
-            )
-        if resp.status_code == 200:
-            body = resp.json()
-            command.status = "ACKED" if body.get("acked") else "FAILED"
-            command.mav_result = body.get("mav_result")
-        else:
-            command.status = "FAILED"
-            command.error = f"gateway returned {resp.status_code}: {resp.text}"
-    except httpx.HTTPError as exc:
-        command.status = "FAILED"
-        command.error = str(exc)
+    result = await _dispatch_gateway_command(req.type, req.altitude_m)
+    command.status = result["status"]
+    command.mav_result = result["mav_result"]
+    command.error = result["error"]
 
     command.resolved_at = datetime.now(timezone.utc)
     session.add(
@@ -161,6 +185,96 @@ def get_command(vehicle_id: str, command_id: str, session: Session = Depends(db_
     if command is None or command.vehicle_id != vehicle_id:
         raise HTTPException(status_code=404, detail="command not found")
     return command
+
+
+@app.post("/vehicles/{vehicle_id}/missions", response_model=MissionOut)
+async def create_mission(
+    vehicle_id: str, req: MissionCreate, session: Session = Depends(db_session)
+):
+    waypoints = [wp.model_dump() for wp in req.waypoints]
+    mission = Mission(vehicle_id=vehicle_id, waypoints=waypoints, status="PENDING")
+    session.add(mission)
+    session.commit()
+    session.refresh(mission)
+
+    try:
+        async with httpx.AsyncClient(timeout=settings.command_timeout_s) as client:
+            resp = await client.post(
+                f"{settings.gateway_base_url}/mission", json={"waypoints": waypoints}
+            )
+        if resp.status_code == 200 and resp.json().get("accepted"):
+            mission.status = "UPLOADED"
+        else:
+            mission.status = "FAILED"
+            mission.error = f"gateway returned {resp.status_code}: {resp.text}"
+    except httpx.HTTPError as exc:
+        mission.status = "FAILED"
+        mission.error = str(exc)
+
+    session.add(
+        EventLogEntry(
+            vehicle_id=vehicle_id,
+            event_type="MISSION_UPLOAD",
+            detail=f"{len(waypoints)} waypoints -> {mission.status}",
+        )
+    )
+    session.commit()
+    session.refresh(mission)
+    return mission
+
+
+@app.get("/vehicles/{vehicle_id}/missions", response_model=list[MissionOut])
+def list_missions(vehicle_id: str, session: Session = Depends(db_session)):
+    stmt = (
+        select(Mission)
+        .where(Mission.vehicle_id == vehicle_id)
+        .order_by(Mission.created_at)
+    )
+    return session.scalars(stmt).all()
+
+
+@app.get("/vehicles/{vehicle_id}/missions/{mission_id}", response_model=MissionOut)
+def get_mission(vehicle_id: str, mission_id: str, session: Session = Depends(db_session)):
+    mission = session.get(Mission, mission_id)
+    if mission is None or mission.vehicle_id != vehicle_id:
+        raise HTTPException(status_code=404, detail="mission not found")
+    return mission
+
+
+@app.post("/vehicles/{vehicle_id}/missions/{mission_id}/start", response_model=MissionOut)
+async def start_mission(
+    vehicle_id: str, mission_id: str, session: Session = Depends(db_session)
+):
+    mission = session.get(Mission, mission_id)
+    if mission is None or mission.vehicle_id != vehicle_id:
+        raise HTTPException(status_code=404, detail="mission not found")
+    if mission.status != "UPLOADED":
+        raise HTTPException(
+            status_code=400,
+            detail=f"mission must be UPLOADED to start (currently {mission.status})",
+        )
+
+    result = await _dispatch_gateway_command("MISSION_START")
+    if result["status"] == "ACKED":
+        mission.status = "ACTIVE"
+        mission.started_at = datetime.now(timezone.utc)
+        vehicle = session.get(Vehicle, vehicle_id)
+        if vehicle is not None:
+            vehicle.active_mission_id = mission.mission_id
+    else:
+        mission.status = "FAILED"
+        mission.error = result["error"] or f"MISSION_START not acked (mav_result={result['mav_result']})"
+
+    session.add(
+        EventLogEntry(
+            vehicle_id=vehicle_id,
+            event_type="MISSION_START",
+            detail=f"{mission_id} -> {mission.status}",
+        )
+    )
+    session.commit()
+    session.refresh(mission)
+    return mission
 
 
 @app.websocket("/ws/telemetry/{vehicle_id}")
