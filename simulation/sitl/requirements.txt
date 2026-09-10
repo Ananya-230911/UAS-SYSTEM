@@ -1,1 +1,2 @@
 pymavlink>=2.4.40,<3
+pytest>=8,<9

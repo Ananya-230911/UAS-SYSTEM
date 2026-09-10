@@ -23,12 +23,20 @@ jobs:
         working-directory: services/api
         run: pip install -r requirements.txt
 
+      - name: Install simulator deps
+        working-directory: simulation/sitl
+        run: pip install -r requirements.txt
+
       - name: Test telemetry gateway
         working-directory: services/telemetry-gateway
         run: PYTHONPATH=. pytest tests/ -v
 
       - name: Test API
         working-directory: services/api
+        run: PYTHONPATH=. pytest tests/ -v
+
+      - name: Test simulator
+        working-directory: simulation/sitl
         run: PYTHONPATH=. pytest tests/ -v
 
       - name: Check gcs-web JS syntax

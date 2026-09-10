@@ -175,6 +175,25 @@ def handle_command(conn, state: VehicleState, msg) -> None:
     conn.mav.command_ack_send(msg.command, result)
 
 
+def prime_connection(conn, state: VehicleState) -> None:
+    """Send one HEARTBEAT before the caller ever attempts to receive.
+
+    Required on Windows. pymavlink's 'udpout' mode (see mavutil.mavudp)
+    never calls socket.bind() -- it only remembers the destination address
+    and sends via sendto(). On POSIX, an unbound UDP socket can still call
+    recvfrom(): the kernel lazily binds it to an ephemeral port and a
+    non-blocking read with no data just returns EWOULDBLOCK, which
+    pymavlink already handles. WinSock has no such lazy-bind-on-recv
+    behavior: calling recvfrom() on a UDP socket with no local address
+    bound raises WSAEINVAL ("WinError 10022"). Windows *does* auto-bind a
+    UDP socket on its first sendto(), so sending one packet here -- before
+    run()'s loop ever calls recv_match() -- forces that bind on every
+    platform. On Linux/macOS this is a harmless, tolerated duplicate
+    heartbeat; on Windows it's what prevents the crash.
+    """
+    send_heartbeat(conn, state)
+
+
 def run(target_host: str, target_port: int, home_lat: float, home_lon: float) -> None:
     conn = mavutil.mavlink_connection(
         f"udpout:{target_host}:{target_port}",
@@ -184,7 +203,8 @@ def run(target_host: str, target_port: int, home_lat: float, home_lon: float) ->
     state = VehicleState(home_lat, home_lon)
     print(f"[sim] streaming MAVLink to {target_host}:{target_port} (sysid={SYSTEM_ID})")
 
-    last_heartbeat = 0.0
+    prime_connection(conn, state)
+    last_heartbeat = time.time()
     last_telem = 0.0
     try:
         while True:
