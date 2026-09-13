@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -28,6 +29,25 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="UAS-SYSTEM API", version="0.1.0", lifespan=lifespan)
+
+# apps/gcs-web is deliberately served from a different origin (a separate
+# static file server on its own port -- see docs/adr/0005-frontend-stack.md
+# and the ?api= query param it takes) -- so every fetch() call the UI
+# makes is cross-origin by design. Browsers don't apply CORS to WebSocket
+# connections, which is why telemetry (delivered over /ws/telemetry and
+# /ws/fleet) can keep working even when every fetch()-based command or
+# mission call fails outright with a generic, unhelpful
+# "TypeError: Failed to fetch" and no server-side error to show for it.
+# allow_origins=["*"] is fine here: this is local dev tooling (no cookies/
+# credentials are used -- every request carries its own explicit token or
+# none at all), not a production deployment.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 def db_session():

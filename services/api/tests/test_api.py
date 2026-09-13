@@ -52,6 +52,35 @@ def test_health(client):
     assert resp.json() == {"status": "ok"}
 
 
+def test_cors_allows_cross_origin_requests(client):
+    # Regression test: apps/gcs-web is served from a different origin than
+    # the API by design (docs/adr/0005-frontend-stack.md), so every
+    # fetch() call it makes is cross-origin. Without CORS headers, the
+    # browser silently blocks the response and fetch() throws a generic
+    # "TypeError: Failed to fetch" -- indistinguishable, from the UI's
+    # perspective, from the server being unreachable, and with nothing
+    # useful printed server-side either. This was observed live: telemetry
+    # kept flowing (WebSocket connections aren't subject to CORS) while
+    # every Arm/Takeoff/Upload command failed identically.
+    preflight = client.options(
+        "/vehicles/sim-1/commands",
+        headers={
+            "Origin": "http://localhost:8080",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+    assert preflight.status_code == 200
+    assert preflight.headers["access-control-allow-origin"] == "*"
+
+    resp = client.post(
+        "/vehicles/sim-1/commands",
+        json={"type": "ARM"},
+        headers={"Origin": "http://localhost:8080"},
+    )
+    assert resp.headers["access-control-allow-origin"] == "*"
+
+
 def test_ingest_telemetry_requires_token(client):
     resp = client.post("/internal/telemetry", json={"vehicle_id": "sim-1"})
     assert resp.status_code == 401
