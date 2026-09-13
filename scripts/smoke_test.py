@@ -165,7 +165,16 @@ def main():
             {"lat": home_lat + 0.0003, "lon": home_lon, "alt_m": 25.0},
             {"lat": home_lat + 0.0003, "lon": home_lon + 0.0004, "alt_m": 25.0},
         ]
-        mission = http_post(f"{API_URL}/vehicles/{VEHICLE_ID}/missions", {"waypoints": waypoints})
+        # Explicit, generous timeout: the API's own internal timeout for a
+        # mission upload is mission_upload_timeout_s (30s default, see
+        # services/api/app/config.py) because the handshake is multiple
+        # MAVLink round trips, not a single ack -- http_post()'s default
+        # 10s client-side timeout is too tight and can fire first
+        # (observed on Windows, where per-packet UDP latency runs higher
+        # than in this project's Linux CI).
+        mission = http_post(
+            f"{API_URL}/vehicles/{VEHICLE_ID}/missions", {"waypoints": waypoints}, timeout=40
+        )
         assert mission["status"] == "UPLOADED", f"mission upload not accepted: {mission}"
         print(f"  -> mission {mission['mission_id']} UPLOADED")
 
