@@ -32,6 +32,9 @@ COMMAND_LONG/COMMAND_ACK) with a simple arm → takeoff → loiter flight model.
   HEARTBEAT `custom_mode` field. This is sufficient to exercise Phase 1's
   arm/takeoff/telemetry vertical slice but is **not** a substitute for real
   autopilot behavior validation.
-- **Follow-up (Phase 2 backlog item):** integrate real PX4 SITL (Docker image
-  `px4io/px4-dev-simulation` or similar) once Docker-in-CI is available, and
-  validate the gateway against it unchanged.
+- **Follow-up — done in Phase 4:** this claim was validated against a real,
+  natively-built PX4 v1.14.0 SITL (jMAVSim), not just architecturally
+  argued. The gateway connected and worked completely unmodified. See
+  `docs/adr/0010-real-px4-sitl-validation.md` for the full result,
+  including a real-autopilot behavior gap (arming/EKF2-convergence
+  timing) this simplified simulator doesn't need to model.

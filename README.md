@@ -3,12 +3,12 @@
 Unmanned Aerial System — ground control, telemetry, and mission management
 software stack.
 
-## Status: Phase 1 (foundation) + Phase 2 (missions) + Phase 3 (fleet) implemented
+## Status: Phases 1-3 implemented; Phase 4 validated real PX4 SITL
 
 See [`docs/PHASE_1_PLAN.md`](docs/PHASE_1_PLAN.md) for the Phase 1 plan and
-[`docs/adr/`](docs/adr/) for the architecture decisions behind all three
+[`docs/adr/`](docs/adr/) for the architecture decisions behind all four
 phases (Phase 2's mission protocol decision is ADR-0008, Phase 3's fleet
-decisions are ADR-0009).
+decisions are ADR-0009, Phase 4's real-PX4 validation is ADR-0010).
 
 Phase 1 delivers a working vertical slice end-to-end against a simulated
 vehicle: telemetry flows from a simulator through a MAVLink gateway into a
@@ -18,7 +18,13 @@ return-to-launch, using the real MAVLink mission protocol so the simulator
 can be swapped for a real autopilot later without a protocol change. Phase 3
 scales that to a fleet: multiple vehicles, each with its own simulator and
 gateway, all visible and commandable from one UI, with commands/missions
-correctly routed to each vehicle's own gateway.
+correctly routed to each vehicle's own gateway. Phase 4 put Phase 1's bet to
+the test: a real, natively-built PX4 SITL was connected to this repo's
+actual, completely unmodified `services/telemetry-gateway` — it worked, with
+zero code changes, confirming HEARTBEAT/telemetry/ARM/TAKEOFF all function
+against real autopilot firmware (see ADR-0010). No code in this repo changed
+for Phase 4; the custom simulator remains the default for day-to-day
+development.
 
 ```
 simulation/sitl  --MAVLink/UDP-->  telemetry-gateway  --HTTP-->  api  <--WS/REST-->  gcs-web
