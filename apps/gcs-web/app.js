@@ -1,12 +1,20 @@
 // Minimal GCS frontend -- see docs/adr/0005-frontend-stack.md for why this
-// is plain HTML/JS instead of React for Phase 1/2.
+// is plain HTML/JS instead of React for Phase 1/2/3.
+//
+// Phase 3 (docs/adr/0009-multi-vehicle-fleet.md): the page now tracks every
+// vehicle it's told about (via GET /vehicles at load, and every message
+// after that from the single /ws/fleet connection) and lets the user pick
+// which one is "selected" -- selection drives the detail panel, the
+// command/mission controls, and which vehicle's trail is drawn. Every
+// other known vehicle still shows as a small marker on the map.
 
 const params = new URLSearchParams(window.location.search);
 const API_BASE = params.get("api") || "http://localhost:8000";
-const VEHICLE_ID = params.get("vehicle") || "sim-1";
 const WS_BASE = API_BASE.replace(/^http/, "ws");
 
-document.getElementById("vehicle-id").textContent = `(${VEHICLE_ID})`;
+let selectedVehicleId = params.get("vehicle") || null;
+const vehicles = {}; // vehicle_id -> latest telemetry/vehicle sample seen
+const fleetMarkers = {}; // vehicle_id -> L.marker, one per known vehicle
 
 const map = L.map("map").setView([37.4275, -122.1697], 17);
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -19,10 +27,10 @@ const droneIcon = L.divIcon({
   html: "▲",
   iconSize: [20, 20],
 });
-let marker = null;
 let path = L.polyline([], { color: "#2563eb", weight: 2 }).addTo(map);
 
 // Phase 2 mission-planning state: waypoints staged locally until uploaded.
+// Scoped to whichever vehicle is currently selected -- see selectVehicle().
 let draftWaypoints = []; // [{lat, lon, alt_m}]
 let draftMarkers = []; // parallel array of L.marker
 let draftPath = L.polyline([], { color: "#f59e0b", weight: 2, dashArray: "6 6" }).addTo(map);
@@ -74,7 +82,77 @@ function fmt(value, digits = 1, suffix = "") {
   return `${Number(value).toFixed(digits)}${suffix}`;
 }
 
+// --- Fleet: every known vehicle gets a marker; the selected one is drawn
+// as the highlighted drone icon, everyone else as a small dot (green if
+// armed, gray otherwise). ---
+
+function iconFor(vehicleId, sample) {
+  if (vehicleId === selectedVehicleId) return droneIcon;
+  const armed = sample && sample.armed;
+  return L.divIcon({ className: `fleet-marker${armed ? " armed" : ""}`, iconSize: [14, 14] });
+}
+
+function updateFleetMarker(vehicleId, sample) {
+  if (sample.lat == null || sample.lon == null) return;
+  const latlng = [sample.lat, sample.lon];
+  if (!fleetMarkers[vehicleId]) {
+    fleetMarkers[vehicleId] = L.marker(latlng, { icon: iconFor(vehicleId, sample) })
+      .addTo(map)
+      .on("click", (e) => {
+        L.DomEvent.stopPropagation(e); // don't also register as a waypoint click
+        selectVehicle(vehicleId);
+      });
+  } else {
+    fleetMarkers[vehicleId].setLatLng(latlng);
+    fleetMarkers[vehicleId].setIcon(iconFor(vehicleId, sample));
+  }
+}
+
+function renderFleetList() {
+  const container = document.getElementById("fleet-list");
+  const ids = Object.keys(vehicles).sort();
+  if (ids.length === 0) {
+    container.innerHTML = '<p class="hint">Waiting for vehicles…</p>';
+    return;
+  }
+  container.innerHTML = "";
+  ids.forEach((id) => {
+    const sample = vehicles[id];
+    const row = document.createElement("div");
+    row.className = `fleet-row${id === selectedVehicleId ? " selected" : ""}`;
+    row.innerHTML =
+      `<span class="fleet-row-id">${id}</span>` +
+      `<span class="fleet-row-meta">${sample.armed ? "ARMED" : "disarmed"} · ` +
+      `${sample.flight_mode || "—"} · ${fmt(sample.battery_pct, 0, "%")}</span>`;
+    row.addEventListener("click", () => selectVehicle(id));
+    container.appendChild(row);
+  });
+}
+
+function selectVehicle(vehicleId) {
+  if (!vehicleId || vehicleId === selectedVehicleId) return;
+  selectedVehicleId = vehicleId;
+  document.getElementById("vehicle-id").textContent = `(${vehicleId})`;
+  path.setLatLngs([]);
+  clearMission();
+
+  // Re-render every marker's icon so the previously-selected vehicle drops
+  // back to a plain fleet dot and the newly-selected one gets the drone icon.
+  Object.keys(fleetMarkers).forEach((id) => {
+    fleetMarkers[id].setIcon(iconFor(id, vehicles[id]));
+  });
+
+  const known = vehicles[vehicleId];
+  if (known && known.lat != null && known.lon != null) {
+    map.setView([known.lat, known.lon], map.getZoom());
+  }
+
+  renderFleetList();
+  loadHistory();
+}
+
 function renderTelemetry(sample) {
+  if (sample.vehicle_id !== selectedVehicleId) return;
   document.getElementById("t-armed").textContent = sample.armed ? "ARMED" : "disarmed";
   document.getElementById("t-mode").textContent = sample.flight_mode || "—";
   document.getElementById("t-alt").textContent = fmt(sample.relative_alt_m, 1, " m");
@@ -94,14 +172,7 @@ function renderTelemetry(sample) {
   document.getElementById("t-updated").textContent = new Date(sample.timestamp).toLocaleTimeString();
 
   if (sample.lat != null && sample.lon != null) {
-    const latlng = [sample.lat, sample.lon];
-    if (!marker) {
-      marker = L.marker(latlng, { icon: droneIcon }).addTo(map);
-      map.setView(latlng, map.getZoom());
-    } else {
-      marker.setLatLng(latlng);
-    }
-    path.addLatLng(latlng);
+    path.addLatLng([sample.lat, sample.lon]);
   }
 }
 
@@ -113,34 +184,71 @@ function logCommand(text, isError = false) {
   log.prepend(line);
 }
 
-async function loadHistory() {
+async function discoverVehicles() {
   try {
-    const resp = await fetch(`${API_BASE}/vehicles/${VEHICLE_ID}/telemetry?limit=50`);
+    const resp = await fetch(`${API_BASE}/vehicles`);
+    if (!resp.ok) return;
+    const list = await resp.json();
+    list.forEach((v) => {
+      // GET /vehicles doesn't carry position -- that arrives via telemetry
+      // (history load or the fleet WS). Seed what we have so the fleet
+      // list shows a previously-seen vehicle even before new data arrives.
+      vehicles[v.vehicle_id] = { ...vehicles[v.vehicle_id], ...v };
+    });
+    renderFleetList();
+    if (!selectedVehicleId && list.length > 0) {
+      selectVehicle(list[0].vehicle_id);
+    } else if (selectedVehicleId) {
+      loadHistory();
+    }
+  } catch (err) {
+    console.warn("failed to discover vehicles", err);
+  }
+}
+
+async function loadHistory() {
+  if (!selectedVehicleId) return;
+  try {
+    const resp = await fetch(`${API_BASE}/vehicles/${selectedVehicleId}/telemetry?limit=50`);
     if (!resp.ok) return;
     const samples = await resp.json();
-    samples.forEach(renderTelemetry);
+    samples.forEach((s) => {
+      vehicles[s.vehicle_id] = s;
+      updateFleetMarker(s.vehicle_id, s);
+      renderTelemetry(s);
+    });
+    renderFleetList();
   } catch (err) {
     console.warn("failed to load telemetry history", err);
   }
 }
 
-function connectWebSocket() {
-  const ws = new WebSocket(`${WS_BASE}/ws/telemetry/${VEHICLE_ID}`);
+function connectFleetWebSocket() {
+  const ws = new WebSocket(`${WS_BASE}/ws/fleet`);
   ws.onopen = () => setStatus("connected", "live");
   ws.onclose = () => {
     setStatus("disconnected", "disconnected — retrying…");
-    setTimeout(connectWebSocket, 2000);
+    setTimeout(connectFleetWebSocket, 2000);
   };
   ws.onerror = () => ws.close();
   ws.onmessage = (event) => {
     const msg = JSON.parse(event.data);
-    if (msg.type === "telemetry") renderTelemetry(msg);
+    if (msg.type !== "telemetry") return;
+    vehicles[msg.vehicle_id] = msg;
+    updateFleetMarker(msg.vehicle_id, msg);
+    if (!selectedVehicleId) selectVehicle(msg.vehicle_id); // first vehicle seen becomes the default focus
+    renderFleetList();
+    renderTelemetry(msg);
   };
 }
 
 async function sendCommand(type, extra = {}) {
+  if (!selectedVehicleId) {
+    logCommand(`${type} FAILED: no vehicle selected`, true);
+    return;
+  }
   try {
-    const resp = await fetch(`${API_BASE}/vehicles/${VEHICLE_ID}/commands`, {
+    const resp = await fetch(`${API_BASE}/vehicles/${selectedVehicleId}/commands`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ type, ...extra }),
@@ -157,12 +265,16 @@ async function sendCommand(type, extra = {}) {
 }
 
 async function uploadMission() {
+  if (!selectedVehicleId) {
+    setMissionStatus("Select a vehicle first.");
+    return;
+  }
   if (draftWaypoints.length === 0) {
     setMissionStatus("Add at least one waypoint by clicking the map first.");
     return;
   }
   try {
-    const resp = await fetch(`${API_BASE}/vehicles/${VEHICLE_ID}/missions`, {
+    const resp = await fetch(`${API_BASE}/vehicles/${selectedVehicleId}/missions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ waypoints: draftWaypoints }),
@@ -180,13 +292,17 @@ async function uploadMission() {
 }
 
 async function startMission() {
+  if (!selectedVehicleId) {
+    setMissionStatus("Select a vehicle first.");
+    return;
+  }
   if (!currentMissionId) {
     setMissionStatus("Upload a mission before starting it.");
     return;
   }
   try {
     const resp = await fetch(
-      `${API_BASE}/vehicles/${VEHICLE_ID}/missions/${currentMissionId}/start`,
+      `${API_BASE}/vehicles/${selectedVehicleId}/missions/${currentMissionId}/start`,
       { method: "POST" }
     );
     const body = await resp.json();
@@ -219,5 +335,8 @@ document.getElementById("btn-mission-upload").addEventListener("click", uploadMi
 document.getElementById("btn-mission-start").addEventListener("click", startMission);
 
 setStatus("unknown", "connecting…");
-loadHistory();
-connectWebSocket();
+if (selectedVehicleId) {
+  document.getElementById("vehicle-id").textContent = `(${selectedVehicleId})`;
+}
+discoverVehicles();
+connectFleetWebSocket();

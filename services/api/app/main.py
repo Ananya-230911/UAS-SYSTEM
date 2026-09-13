@@ -49,6 +49,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Reserved ws_manager channel key carrying every vehicle's telemetry, for
+# the fleet-wide view (docs/adr/0009-multi-vehicle-fleet.md). Not a valid
+# vehicle_id (vehicle_ids come from the gateway/simulator's VEHICLE_ID env
+# var), so it can't collide with a real one.
+FLEET_CHANNEL = "__fleet__"
+
 
 def db_session():
     session = get_session()
@@ -115,9 +121,12 @@ async def ingest_telemetry(
     session.add(row)
     session.commit()
 
-    await ws_manager.broadcast(
-        sample.vehicle_id, {"type": "telemetry", "timestamp": now.isoformat(), **sample.model_dump()}
-    )
+    message = {"type": "telemetry", "timestamp": now.isoformat(), **sample.model_dump()}
+    await ws_manager.broadcast(sample.vehicle_id, message)
+    # Phase 3: also fan out to the fleet-wide channel so the UI can show
+    # every vehicle on one map without opening one socket per vehicle
+    # (see docs/adr/0009-multi-vehicle-fleet.md).
+    await ws_manager.broadcast(FLEET_CHANNEL, message)
     return {"status": "accepted"}
 
 
@@ -149,15 +158,26 @@ def get_telemetry(
     return list(reversed(rows))
 
 
-async def _dispatch_gateway_command(command_type: str, altitude_m: float | None = None) -> dict:
-    """POST /command to the gateway and normalize the outcome into
-    {"status": "ACKED"|"FAILED", "mav_result": int|None, "error": str|None}.
+def _gateway_url_for(vehicle_id: str) -> str:
+    """Which gateway a vehicle's commands/missions go to. Phase 3
+    (docs/adr/0009-multi-vehicle-fleet.md): each vehicle has its own
+    gateway process; GATEWAY_URLS_JSON maps vehicle_id -> base URL, and
+    anything not in that map falls back to gateway_base_url (correct for
+    Phase 1/2's single-vehicle setup with zero config changes needed)."""
+    return settings.gateway_urls.get(vehicle_id, settings.gateway_base_url)
+
+
+async def _dispatch_gateway_command(
+    vehicle_id: str, command_type: str, altitude_m: float | None = None
+) -> dict:
+    """POST /command to vehicle_id's gateway and normalize the outcome
+    into {"status": "ACKED"|"FAILED", "mav_result": int|None, "error": str|None}.
     Shared by create_command() and start_mission() so both go through one
     place for gateway-call error handling."""
     try:
         async with httpx.AsyncClient(timeout=settings.command_timeout_s) as client:
             resp = await client.post(
-                f"{settings.gateway_base_url}/command",
+                f"{_gateway_url_for(vehicle_id)}/command",
                 json={"type": command_type, "altitude_m": altitude_m},
             )
         if resp.status_code == 200:
@@ -190,7 +210,7 @@ async def create_command(
     session.commit()
     session.refresh(command)
 
-    result = await _dispatch_gateway_command(req.type, req.altitude_m)
+    result = await _dispatch_gateway_command(vehicle_id, req.type, req.altitude_m)
     command.status = result["status"]
     command.mav_result = result["mav_result"]
     command.error = result["error"]
@@ -229,7 +249,7 @@ async def create_mission(
     try:
         async with httpx.AsyncClient(timeout=settings.mission_upload_timeout_s) as client:
             resp = await client.post(
-                f"{settings.gateway_base_url}/mission", json={"waypoints": waypoints}
+                f"{_gateway_url_for(vehicle_id)}/mission", json={"waypoints": waypoints}
             )
         if resp.status_code == 200 and resp.json().get("accepted"):
             mission.status = "UPLOADED"
@@ -283,7 +303,7 @@ async def start_mission(
             detail=f"mission must be UPLOADED to start (currently {mission.status})",
         )
 
-    result = await _dispatch_gateway_command("MISSION_START")
+    result = await _dispatch_gateway_command(vehicle_id, "MISSION_START")
     if result["status"] == "ACKED":
         mission.status = "ACTIVE"
         mission.started_at = datetime.now(timezone.utc)
@@ -317,3 +337,18 @@ async def telemetry_ws(websocket: WebSocket, vehicle_id: str):
         pass
     finally:
         ws_manager.disconnect(vehicle_id, websocket)
+
+
+@app.websocket("/ws/fleet")
+async def fleet_ws(websocket: WebSocket):
+    """Every vehicle's telemetry over one connection -- see
+    docs/adr/0009-multi-vehicle-fleet.md. Same connect/disconnect pattern
+    as /ws/telemetry/{vehicle_id}, just on the reserved fleet channel."""
+    await ws_manager.connect(FLEET_CHANNEL, websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        ws_manager.disconnect(FLEET_CHANNEL, websocket)

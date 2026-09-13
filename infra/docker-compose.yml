@@ -8,6 +8,11 @@ services:
       DATABASE_URL: sqlite:///./uas.db
       UAS_INTERNAL_TOKEN: dev-secret
       GATEWAY_BASE_URL: http://gateway:8001
+      # Phase 3: routes each vehicle's commands/missions to its own
+      # gateway container (see docs/adr/0009-multi-vehicle-fleet.md and
+      # app/config.py's gateway_urls). sim-1 isn't listed -- it already
+      # falls back to GATEWAY_BASE_URL above.
+      GATEWAY_URLS_JSON: '{"sim-2": "http://gateway-2:8001"}'
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 3s
@@ -36,6 +41,37 @@ services:
     command: ["--target-host", "gateway", "--target-port", "14550"]
     depends_on:
       - gateway
+
+  # Phase 3 (docs/adr/0009-multi-vehicle-fleet.md): a second vehicle is
+  # just another (gateway, sitl) pair on different ports, pointed at the
+  # same api. No gateway/sitl code changes needed for this -- add a
+  # gateway-3/sitl-3 the same way for a third vehicle, and so on.
+  gateway-2:
+    build:
+      context: ../services/telemetry-gateway
+    ports:
+      # Host 8002 -> the container's actual listening port. The gateway
+      # image's CMD hardcodes --port 8001 (see its Dockerfile); Docker
+      # gives every container its own network namespace, so two
+      # containers each listening on 8001 internally don't clash.
+      - "8002:8001"
+      - "14551:14551/udp"
+    environment:
+      VEHICLE_ID: sim-2
+      GATEWAY_MAVLINK_HOST: 0.0.0.0
+      GATEWAY_MAVLINK_PORT: "14551"
+      API_BASE_URL: http://api:8000
+      UAS_INTERNAL_TOKEN: dev-secret
+    depends_on:
+      api:
+        condition: service_healthy
+
+  sitl-2:
+    build:
+      context: ../simulation/sitl
+    command: ["--target-host", "gateway-2", "--target-port", "14551", "--home-lat", "37.4290", "--home-lon", "-122.1680"]
+    depends_on:
+      - gateway-2
 
   gcs-web:
     build:

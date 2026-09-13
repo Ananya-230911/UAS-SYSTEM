@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
-"""End-to-end Phase 1/2 smoke test.
+"""End-to-end Phase 1/2/3 smoke test.
 
 Starts api + telemetry-gateway + sitl as subprocesses, waits for telemetry to
 flow, arms the simulated vehicle, commands takeoff, and asserts altitude
 increases (Phase 1). Then uploads and starts a two-waypoint mission and
 asserts the vehicle actually flies it (current_waypoint_seq advances), and
 commands RTL and asserts the vehicle flies home and disarms itself (Phase 2,
-see docs/adr/0008-mission-protocol.md). This is the CI gate for "the
-vertical slice still works" (see docs/PHASE_1_PLAN.md, section 8).
+see docs/adr/0008-mission-protocol.md). Then brings up a second vehicle
+(its own gateway + simulator) and asserts a command sent to it reaches its
+own gateway and only its own gateway -- proving the multi-vehicle command
+routing added in Phase 3 actually works, not just that two vehicles can
+send telemetry (see docs/adr/0009-multi-vehicle-fleet.md). This is the CI
+gate for "the vertical slice still works" (see docs/PHASE_1_PLAN.md,
+section 8).
 
 Assumes the three services' dependencies are already installed (either in
 the active interpreter, or point PYTHON at a venv's python3).
@@ -25,7 +30,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PYTHON = os.environ.get("PYTHON", sys.executable)
 API_URL = "http://127.0.0.1:8000"
 GATEWAY_URL = "http://127.0.0.1:8001"
+GATEWAY2_URL = "http://127.0.0.1:8002"
 VEHICLE_ID = "sim-1"
+VEHICLE2_ID = "sim-2"
 LOG_DIR = tempfile.mkdtemp(prefix="uas-smoke-")
 
 
@@ -77,7 +84,13 @@ def main():
             "api",
             os.path.join(ROOT, "services", "api"),
             [PYTHON, "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"],
-            {"PYTHONPATH": "."},
+            {
+                "PYTHONPATH": ".",
+                # Routes sim-2's commands to its own gateway (port 8002,
+                # started later below) -- sim-1 uses GATEWAY_BASE_URL, the
+                # default, unset here so it falls back correctly.
+                "GATEWAY_URLS_JSON": json.dumps({VEHICLE2_ID: GATEWAY2_URL}),
+            },
         )
         wait_for(lambda: http_get(f"{API_URL}/health").get("status") == "ok", 20, "API /health")
         print("API is up.")
@@ -182,6 +195,57 @@ def main():
             "vehicle to disarm after RTL",
         )
         print("  -> vehicle disarmed (RTL complete).")
+
+        print("Bringing up a second vehicle (sim-2) to test fleet command routing...")
+        spawn(
+            "gateway-2",
+            os.path.join(ROOT, "services", "telemetry-gateway"),
+            [PYTHON, "-m", "uvicorn", "gateway.main:app", "--host", "0.0.0.0", "--port", "8002"],
+            {
+                "PYTHONPATH": ".",
+                "API_BASE_URL": API_URL,
+                "VEHICLE_ID": VEHICLE2_ID,
+                "GATEWAY_MAVLINK_PORT": "14551",
+            },
+        )
+        wait_for(lambda: http_get(f"{GATEWAY2_URL}/health").get("status") == "ok", 20, "gateway-2 /health")
+
+        spawn(
+            "sitl-2",
+            os.path.join(ROOT, "simulation", "sitl"),
+            [
+                PYTHON, "sim.py", "--target-host", "127.0.0.1", "--target-port", "14551",
+                "--home-lat", "37.4290", "--home-lon", "-122.1680",
+            ],
+        )
+        wait_for(
+            lambda: http_get(f"{GATEWAY2_URL}/health").get("mavlink_connected") is True,
+            20,
+            "gateway-2 MAVLink connection (HEARTBEAT)",
+        )
+        wait_for(
+            lambda: len(http_get(f"{API_URL}/vehicles/{VEHICLE2_ID}/telemetry?limit=1")) >= 1,
+            20,
+            "sim-2 telemetry reaching the API",
+        )
+        print("  -> sim-2 telemetry flowing.")
+
+        print("Sending ARM to sim-2 -- must reach gateway-2, not gateway-1...")
+        arm2_result = http_post(f"{API_URL}/vehicles/{VEHICLE2_ID}/commands", {"type": "ARM"})
+        assert arm2_result["status"] == "ACKED", f"sim-2 ARM not acked: {arm2_result}"
+
+        wait_for(
+            lambda: http_get(f"{API_URL}/vehicles/{VEHICLE2_ID}").get("armed") is True,
+            10,
+            "sim-2 armed state to propagate",
+        )
+        sim1_state = http_get(f"{API_URL}/vehicles/{VEHICLE_ID}")
+        assert sim1_state["armed"] is False, (
+            f"sim-1 should be untouched by sim-2's ARM command, but got: {sim1_state} "
+            "-- this would mean multi-vehicle command routing is broken and every "
+            "command is going to one gateway regardless of target vehicle"
+        )
+        print("  -> sim-2 armed; sim-1 untouched. Fleet command routing confirmed.")
 
         print("\nSMOKE TEST PASSED\n")
         return 0

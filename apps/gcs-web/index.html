@@ -2,14 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>UAS-SYSTEM — GCS (Phase 2)</title>
+  <title>UAS-SYSTEM — GCS (Phase 3)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <header>
-    <h1>UAS-SYSTEM <span class="phase-tag">Phase 2</span></h1>
+    <h1>UAS-SYSTEM <span class="phase-tag">Phase 3</span></h1>
     <div id="connection-status" class="status status--unknown">connecting…</div>
   </header>
 
@@ -17,6 +17,11 @@
     <div id="map"></div>
 
     <aside id="panel">
+      <section>
+        <h2>Fleet</h2>
+        <div id="fleet-list"><p class="hint">Waiting for vehicles…</p></div>
+      </section>
+
       <section>
         <h2>Telemetry <span id="vehicle-id"></span></h2>
         <dl class="telemetry-grid">

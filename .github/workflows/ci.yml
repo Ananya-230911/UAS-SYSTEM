@@ -58,5 +58,5 @@ jobs:
           pip install -r services/telemetry-gateway/requirements.txt
           pip install -r simulation/sitl/requirements.txt
 
-      - name: Run end-to-end smoke test (sim -> gateway -> API, arm + takeoff)
+      - name: Run end-to-end smoke test (arm/takeoff/mission/RTL, 2-vehicle fleet routing)
         run: python3 scripts/smoke_test.py

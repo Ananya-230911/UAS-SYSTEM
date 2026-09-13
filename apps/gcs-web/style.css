@@ -183,3 +183,57 @@ main {
   border: 2px solid white;
   box-shadow: 0 0 2px rgba(0,0,0,0.4);
 }
+
+#fleet-list {
+  font-size: 0.8rem;
+}
+
+.fleet-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.4rem 0.5rem;
+  margin-bottom: 0.25rem;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  cursor: pointer;
+}
+
+.fleet-row:hover {
+  background: #f8fafc;
+}
+
+.fleet-row.selected {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+
+.fleet-row .fleet-row-id {
+  font-weight: 600;
+}
+
+.fleet-row .fleet-row-meta {
+  color: #64748b;
+  font-size: 0.75rem;
+}
+
+.fleet-marker {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #94a3b8;
+  border: 2px solid white;
+  box-shadow: 0 0 2px rgba(0,0,0,0.4);
+}
+
+.fleet-marker.selected {
+  background: #2563eb;
+}
+
+.fleet-marker.armed {
+  background: #16a34a;
+}
+
+.fleet-marker.selected.armed {
+  background: #2563eb;
+}
