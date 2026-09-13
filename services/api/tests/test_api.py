@@ -1,3 +1,4 @@
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -173,3 +174,42 @@ def test_start_mission_requires_uploaded_status(client, monkeypatch):
 def test_get_mission_404_for_unknown_id(client):
     resp = client.get("/vehicles/sim-1/missions/does-not-exist")
     assert resp.status_code == 404
+
+
+def test_mission_upload_timeout_never_reports_an_empty_error(client, monkeypatch):
+    # Regression test: some httpx exceptions (notably timeouts raised
+    # internally by its transport layer) have str(exc) == "". Before
+    # _error_message() existed, that produced mission.error = "", which
+    # the UI's `error || detail || "unknown error"` fallback rendered as
+    # an unhelpful "unknown error" with no clue what actually happened --
+    # exactly what was observed uploading a 5-waypoint mission on Windows.
+    class TimingOutClient(FakeAsyncClient):
+        async def post(self, url, json=None):
+            raise httpx.ReadTimeout("")  # empty message, like the real one
+
+    monkeypatch.setattr("app.main.httpx.AsyncClient", TimingOutClient)
+
+    resp = client.post(
+        "/vehicles/sim-1/missions",
+        json={"waypoints": [{"lat": 1.0, "lon": 2.0, "alt_m": 10.0}]},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "FAILED"
+    assert body["error"]  # must be truthy/non-empty
+    assert "ReadTimeout" in body["error"]
+
+
+def test_command_timeout_never_reports_an_empty_error(client, monkeypatch):
+    class TimingOutClient(FakeAsyncClient):
+        async def post(self, url, json=None):
+            raise httpx.ConnectTimeout("")
+
+    monkeypatch.setattr("app.main.httpx.AsyncClient", TimingOutClient)
+
+    resp = client.post("/vehicles/sim-1/commands", json={"type": "ARM"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "FAILED"
+    assert body["error"]
+    assert "ConnectTimeout" in body["error"]

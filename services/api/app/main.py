@@ -48,6 +48,15 @@ def _check_internal_token(x_internal_token: str | None) -> None:
         raise HTTPException(status_code=401, detail="invalid internal token")
 
 
+def _error_message(exc: Exception) -> str:
+    """str(exc), but never empty. Some httpx exceptions (notably timeouts
+    raised internally by its transport layer) have an empty message --
+    str(httpx.ReadTimeout()) == "" -- which without this falls through the
+    UI's `error || detail || "unknown error"` fallback and shows up as a
+    useless "unknown error" with no clue what actually happened."""
+    return str(exc) or f"{type(exc).__name__} (gateway call failed with no further detail)"
+
+
 @app.post("/internal/telemetry")
 async def ingest_telemetry(
     sample: TelemetryIngest,
@@ -144,7 +153,7 @@ async def _dispatch_gateway_command(command_type: str, altitude_m: float | None 
             "error": f"gateway returned {resp.status_code}: {resp.text}",
         }
     except httpx.HTTPError as exc:
-        return {"status": "FAILED", "mav_result": None, "error": str(exc)}
+        return {"status": "FAILED", "mav_result": None, "error": _error_message(exc)}
 
 
 @app.post("/vehicles/{vehicle_id}/commands", response_model=CommandOut)
@@ -198,7 +207,7 @@ async def create_mission(
     session.refresh(mission)
 
     try:
-        async with httpx.AsyncClient(timeout=settings.command_timeout_s) as client:
+        async with httpx.AsyncClient(timeout=settings.mission_upload_timeout_s) as client:
             resp = await client.post(
                 f"{settings.gateway_base_url}/mission", json={"waypoints": waypoints}
             )
@@ -209,7 +218,7 @@ async def create_mission(
             mission.error = f"gateway returned {resp.status_code}: {resp.text}"
     except httpx.HTTPError as exc:
         mission.status = "FAILED"
-        mission.error = str(exc)
+        mission.error = _error_message(exc)
 
     session.add(
         EventLogEntry(

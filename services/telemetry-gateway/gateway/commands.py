@@ -50,3 +50,14 @@ def build_command(command_type: str, altitude_m: float | None = None) -> MavComm
         # uploaded mission from the start."
         return MavCommand(MAV_CMD_MISSION_START, [0.0, 0.0])
     raise UnsupportedCommand(f"unsupported command type: {command_type!r}")
+
+
+def mission_upload_timeout_for(waypoint_count: int) -> float:
+    """How long to allow a mission upload handshake to take, scaled by
+    waypoint count -- each waypoint is its own MISSION_REQUEST_INT /
+    MISSION_ITEM_INT round trip (see docs/adr/0008-mission-protocol.md), so
+    a fixed timeout that's fine for 2 waypoints can be too tight for 10+,
+    especially with real network latency (observed on Windows during
+    Phase 2 testing). services/api's mission_upload_timeout_s must stay
+    comfortably above whatever this returns for realistic mission sizes."""
+    return max(10.0, 2.0 * waypoint_count)

@@ -3,7 +3,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from .commands import SUPPORTED_COMMAND_TYPES, UnsupportedCommand, build_command
+from .commands import (
+    SUPPORTED_COMMAND_TYPES,
+    UnsupportedCommand,
+    build_command,
+    mission_upload_timeout_for,
+)
 from .config import settings
 from .mavlink_client import (
     CommandTimeout,
@@ -81,7 +86,7 @@ def upload_mission(req: MissionUploadRequest) -> dict:
 
     waypoints = [wp.model_dump() for wp in req.waypoints]
     try:
-        gateway_client.upload_mission(waypoints)
+        gateway_client.upload_mission(waypoints, timeout=mission_upload_timeout_for(len(waypoints)))
     except MissionUploadTimeout as exc:
         raise HTTPException(status_code=504, detail=str(exc))
     except MissionUploadRejected as exc:

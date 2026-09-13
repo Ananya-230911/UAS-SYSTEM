@@ -8,6 +8,7 @@ from gateway.commands import (
     MODE_NAMES,
     UnsupportedCommand,
     build_command,
+    mission_upload_timeout_for,
 )
 
 
@@ -64,3 +65,13 @@ def test_mission_start_command():
     cmd = build_command("MISSION_START")
     assert cmd.command_id == MAV_CMD_MISSION_START
     assert cmd.params == [0.0, 0.0]
+
+
+def test_mission_upload_timeout_has_a_floor_for_small_missions():
+    assert mission_upload_timeout_for(0) == 10.0
+    assert mission_upload_timeout_for(1) == 10.0
+
+
+def test_mission_upload_timeout_scales_with_waypoint_count():
+    assert mission_upload_timeout_for(10) == 20.0
+    assert mission_upload_timeout_for(20) == 40.0
