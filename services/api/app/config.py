@@ -32,6 +32,13 @@ class Settings:
     mission_upload_timeout_s: float = float(os.environ.get("MISSION_UPLOAD_TIMEOUT_S", "30"))
     host: str = os.environ.get("API_HOST", "0.0.0.0")
     port: int = int(os.environ.get("API_PORT", "8000"))
+    # Phase 5 (docs/adr/0011-api-authentication.md): every user-facing
+    # endpoint (vehicles/commands/missions/WS) requires this as an
+    # X-API-Key header (or ?api_key= query param for the two WS routes,
+    # since browsers can't set custom headers on a WebSocket handshake).
+    # Empty by default -- auth is opt-in, so Phase 1-4's zero-config local
+    # dev/testing keeps working unchanged unless this is explicitly set.
+    api_key: str = os.environ.get("API_KEY", "")
 
 
 settings = Settings()

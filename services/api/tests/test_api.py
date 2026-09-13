@@ -304,3 +304,103 @@ def test_command_is_routed_to_the_correct_vehicles_gateway(client, monkeypatch):
 
     client.post("/vehicles/sim-1/commands", json={"type": "ARM"})
     assert FakeAsyncClient.last_request[0].startswith(settings.gateway_base_url)
+
+
+# --- Phase 5: API key auth (docs/adr/0011-api-authentication.md) ---
+# Every test above runs with settings.api_key at its default (""), and
+# passes with zero auth headers -- that's the regression guard for "opt-in,
+# off by default" already, implicitly, since none of them set an API key.
+# These tests cover the opted-in behavior explicitly.
+
+
+def test_vehicles_endpoint_requires_no_key_by_default(client):
+    # Belt-and-suspenders explicit check alongside the implicit one above:
+    # with API_KEY unset (the default), no header is needed at all.
+    resp = client.get("/vehicles")
+    assert resp.status_code == 200
+
+
+def test_rest_endpoint_rejects_missing_or_wrong_key_when_api_key_is_set(client, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "api_key", "s3cret")
+
+    no_header = client.get("/vehicles")
+    assert no_header.status_code == 401
+
+    wrong_header = client.get("/vehicles", headers={"X-API-Key": "nope"})
+    assert wrong_header.status_code == 401
+
+    right_header = client.get("/vehicles", headers={"X-API-Key": "s3cret"})
+    assert right_header.status_code == 200
+
+
+def test_command_and_mission_routes_also_require_the_key(client, monkeypatch):
+    # Regression guard: require_api_key must be wired onto every
+    # user-facing route, not just GET /vehicles -- particularly the
+    # state-changing ones (arm/disarm/command a vehicle, upload/start a
+    # mission) that motivated this ADR in the first place.
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "api_key", "s3cret")
+    monkeypatch.setattr("app.main.httpx.AsyncClient", FakeAsyncClient)
+
+    assert client.post("/vehicles/sim-1/commands", json={"type": "ARM"}).status_code == 401
+    assert (
+        client.post(
+            "/vehicles/sim-1/commands",
+            json={"type": "ARM"},
+            headers={"X-API-Key": "s3cret"},
+        ).status_code
+        == 200
+    )
+
+    waypoints = {"waypoints": [{"lat": 1.0, "lon": 2.0, "alt_m": 10}]}
+    assert client.post("/vehicles/sim-1/missions", json=waypoints).status_code == 401
+    assert (
+        client.post(
+            "/vehicles/sim-1/missions",
+            json=waypoints,
+            headers={"X-API-Key": "s3cret"},
+        ).status_code
+        == 200
+    )
+
+
+def test_health_never_requires_a_key(client, monkeypatch):
+    # /health must stay publicly probeable by orchestration/monitoring
+    # without a credential, even when auth is turned on for everything
+    # else (docs/adr/0011-api-authentication.md).
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "api_key", "s3cret")
+    resp = client.get("/health")
+    assert resp.status_code == 200
+
+
+def test_fleet_ws_requires_key_via_query_param_when_set(client, monkeypatch):
+    # Browsers can't set custom headers on a WS handshake, so the key
+    # travels as ?api_key= instead -- see require_ws_api_key(). The server
+    # closes the socket (code 1008) before accepting when the key is
+    # missing/wrong, which the test client surfaces as a failure to
+    # connect rather than a clean session.
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "api_key", "s3cret")
+
+    with pytest.raises(Exception):
+        with client.websocket_connect("/ws/fleet"):
+            pass
+
+    with pytest.raises(Exception):
+        with client.websocket_connect("/ws/fleet?api_key=wrong"):
+            pass
+
+    with client.websocket_connect("/ws/fleet?api_key=s3cret") as ws:
+        client.post(
+            "/internal/telemetry",
+            json={"vehicle_id": "auth-test", "armed": False, "flight_mode": "STANDBY"},
+            headers={"X-Internal-Token": "test-secret"},
+        )
+        message = ws.receive_json()
+        assert message["vehicle_id"] == "auth-test"

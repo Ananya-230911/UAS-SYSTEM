@@ -11,6 +11,23 @@
 const params = new URLSearchParams(window.location.search);
 const API_BASE = params.get("api") || "http://localhost:8000";
 const WS_BASE = API_BASE.replace(/^http/, "ws");
+// Phase 5 (docs/adr/0011-api-authentication.md): opt-in shared API key.
+// Empty when the API isn't configured with one (Phase 1-4 default), in
+// which case every header/query-param below is simply absent/blank and
+// the API's own no-op check (require_api_key/require_ws_api_key) lets
+// everything through unchanged.
+const API_KEY = params.get("api_key") || "";
+
+function authHeaders(extra = {}) {
+  return API_KEY ? { ...extra, "X-API-Key": API_KEY } : extra;
+}
+
+function withApiKey(url) {
+  if (!API_KEY) return url;
+  const u = new URL(url);
+  u.searchParams.set("api_key", API_KEY);
+  return u.toString();
+}
 
 let selectedVehicleId = params.get("vehicle") || null;
 const vehicles = {}; // vehicle_id -> latest telemetry/vehicle sample seen
@@ -186,7 +203,7 @@ function logCommand(text, isError = false) {
 
 async function discoverVehicles() {
   try {
-    const resp = await fetch(`${API_BASE}/vehicles`);
+    const resp = await fetch(`${API_BASE}/vehicles`, { headers: authHeaders() });
     if (!resp.ok) return;
     const list = await resp.json();
     list.forEach((v) => {
@@ -209,7 +226,9 @@ async function discoverVehicles() {
 async function loadHistory() {
   if (!selectedVehicleId) return;
   try {
-    const resp = await fetch(`${API_BASE}/vehicles/${selectedVehicleId}/telemetry?limit=50`);
+    const resp = await fetch(`${API_BASE}/vehicles/${selectedVehicleId}/telemetry?limit=50`, {
+      headers: authHeaders(),
+    });
     if (!resp.ok) return;
     const samples = await resp.json();
     samples.forEach((s) => {
@@ -224,7 +243,7 @@ async function loadHistory() {
 }
 
 function connectFleetWebSocket() {
-  const ws = new WebSocket(`${WS_BASE}/ws/fleet`);
+  const ws = new WebSocket(withApiKey(`${WS_BASE}/ws/fleet`));
   ws.onopen = () => setStatus("connected", "live");
   ws.onclose = () => {
     setStatus("disconnected", "disconnected — retrying…");
@@ -250,7 +269,7 @@ async function sendCommand(type, extra = {}) {
   try {
     const resp = await fetch(`${API_BASE}/vehicles/${selectedVehicleId}/commands`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ type, ...extra }),
     });
     const body = await resp.json();
@@ -276,7 +295,7 @@ async function uploadMission() {
   try {
     const resp = await fetch(`${API_BASE}/vehicles/${selectedVehicleId}/missions`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ waypoints: draftWaypoints }),
     });
     const body = await resp.json();
@@ -303,7 +322,7 @@ async function startMission() {
   try {
     const resp = await fetch(
       `${API_BASE}/vehicles/${selectedVehicleId}/missions/${currentMissionId}/start`,
-      { method: "POST" }
+      { method: "POST", headers: authHeaders() }
     );
     const body = await resp.json();
     if (!resp.ok || body.status !== "ACTIVE") {

@@ -4,10 +4,30 @@ REST + WebSocket backend: persists telemetry, dispatches commands to each
 vehicle's gateway, streams live telemetry to UI clients (per-vehicle and
 fleet-wide).
 
+## Authentication (Phase 5)
+
+Every endpoint below except `GET /health` and `POST /internal/telemetry`
+requires an API key **once `API_KEY` is set** (see
+`docs/adr/0011-api-authentication.md`). Unset by default, in which case
+none of this applies and every endpoint behaves exactly as in Phase 1-4:
+
+```bash
+export API_KEY=some-shared-secret
+```
+
+- REST: send it as `X-API-Key: some-shared-secret`
+- WebSocket (`/ws/telemetry/{id}`, `/ws/fleet`): browsers can't set
+  custom headers on a WS handshake, so send it as a query param instead:
+  `ws://.../ws/fleet?api_key=some-shared-secret`
+
+A request/connection missing the key, or with the wrong one, gets a `401`
+(REST) or the socket is closed with code `1008` (WebSocket).
+
 ## Endpoints
-- `GET /health`
+- `GET /health` — no auth required
 - `POST /internal/telemetry` — gateway → API telemetry ingest (requires
-  `X-Internal-Token` header matching `UAS_INTERNAL_TOKEN`)
+  `X-Internal-Token` header matching `UAS_INTERNAL_TOKEN`, a separate
+  mechanism from `API_KEY` above)
 - `GET /vehicles`, `GET /vehicles/{id}`
 - `GET /vehicles/{id}/telemetry?limit=100` — recent history, oldest first
 - `POST /vehicles/{id}/commands` — `{"type": "ARM"|"DISARM"|"TAKEOFF"|"RTL"|"MISSION_START", "altitude_m": ...}`,

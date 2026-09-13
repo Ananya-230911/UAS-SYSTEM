@@ -3,12 +3,13 @@
 Unmanned Aerial System — ground control, telemetry, and mission management
 software stack.
 
-## Status: Phases 1-3 implemented; Phase 4 validated real PX4 SITL
+## Status: Phases 1-3 implemented; Phase 4 validated real PX4 SITL; Phase 5 adds API authentication
 
 See [`docs/PHASE_1_PLAN.md`](docs/PHASE_1_PLAN.md) for the Phase 1 plan and
-[`docs/adr/`](docs/adr/) for the architecture decisions behind all four
+[`docs/adr/`](docs/adr/) for the architecture decisions behind all five
 phases (Phase 2's mission protocol decision is ADR-0008, Phase 3's fleet
-decisions are ADR-0009, Phase 4's real-PX4 validation is ADR-0010).
+decisions are ADR-0009, Phase 4's real-PX4 validation is ADR-0010, Phase
+5's API key auth is ADR-0011).
 
 Phase 1 delivers a working vertical slice end-to-end against a simulated
 vehicle: telemetry flows from a simulator through a MAVLink gateway into a
@@ -24,7 +25,12 @@ actual, completely unmodified `services/telemetry-gateway` — it worked, with
 zero code changes, confirming HEARTBEAT/telemetry/ARM/TAKEOFF all function
 against real autopilot firmware (see ADR-0010). No code in this repo changed
 for Phase 4; the custom simulator remains the default for day-to-day
-development.
+development. Phase 5 closes the biggest production gap left after that:
+every vehicle-facing endpoint (commands, missions, telemetry, both
+WebSocket routes) now requires a shared API key once one is configured —
+opt-in and off by default, so none of Phases 1-4's zero-config testing
+changes unless you explicitly set `API_KEY` (see
+[`docs/adr/0011-api-authentication.md`](docs/adr/0011-api-authentication.md)).
 
 ```
 simulation/sitl  --MAVLink/UDP-->  telemetry-gateway  --HTTP-->  api  <--WS/REST-->  gcs-web
@@ -96,6 +102,23 @@ sim-2's commands to its own gateway (see
 [`docs/adr/0009-multi-vehicle-fleet.md`](docs/adr/0009-multi-vehicle-fleet.md)).
 Both vehicles will show up in the same browser tab's Fleet list — no
 `vehicle=` query param needed.
+
+### Want API authentication (Phase 5)?
+
+Off by default — everything above works unchanged with no key. To turn
+it on, set `API_KEY` on Terminal 1 (the API) before starting it:
+
+```powershell
+$env:API_KEY = "some-shared-secret"
+```
+
+Then open the UI with the key in the URL so it sends it on every request:
+`http://localhost:8080/?api=http://localhost:8000&api_key=some-shared-secret`.
+Without the key, `Invoke-RestMethod http://127.0.0.1:8000/vehicles` should
+now fail with a `401`; with it
+(`-Headers @{"X-API-Key"="some-shared-secret"}`) it should succeed. See
+[`docs/adr/0011-api-authentication.md`](docs/adr/0011-api-authentication.md)
+and `services/api/README.md` for the full endpoint list this covers.
 
 ## Quick start (Docker)
 

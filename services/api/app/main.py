@@ -74,6 +74,29 @@ def _check_internal_token(x_internal_token: str | None) -> None:
         raise HTTPException(status_code=401, detail="invalid internal token")
 
 
+def require_api_key(x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> None:
+    """Gate for every user-facing endpoint (docs/adr/0011-api-authentication.md).
+    A no-op when API_KEY isn't set (Settings.api_key == ""), which is the
+    default -- Phase 1-4's zero-config local dev/testing keeps working
+    unchanged unless a deployment explicitly opts into auth."""
+    if settings.api_key and x_api_key != settings.api_key:
+        raise HTTPException(status_code=401, detail="missing or invalid API key")
+
+
+async def require_ws_api_key(websocket: WebSocket) -> bool:
+    """Same gate as require_api_key(), for the two WS routes. Browsers
+    can't set custom headers on a WebSocket handshake, so the key travels
+    as ?api_key= instead. Returns False (and closes the socket) on
+    failure -- callers must return immediately without calling
+    ws_manager.connect() in that case."""
+    if not settings.api_key:
+        return True
+    if websocket.query_params.get("api_key") != settings.api_key:
+        await websocket.close(code=1008)  # policy violation
+        return False
+    return True
+
+
 def _error_message(exc: Exception) -> str:
     """str(exc), but never empty. Some httpx exceptions (notably timeouts
     raised internally by its transport layer) have an empty message --
@@ -130,12 +153,14 @@ async def ingest_telemetry(
     return {"status": "accepted"}
 
 
-@app.get("/vehicles", response_model=list[VehicleOut])
+@app.get("/vehicles", response_model=list[VehicleOut], dependencies=[Depends(require_api_key)])
 def list_vehicles(session: Session = Depends(db_session)):
     return session.scalars(select(Vehicle)).all()
 
 
-@app.get("/vehicles/{vehicle_id}", response_model=VehicleOut)
+@app.get(
+    "/vehicles/{vehicle_id}", response_model=VehicleOut, dependencies=[Depends(require_api_key)]
+)
 def get_vehicle(vehicle_id: str, session: Session = Depends(db_session)):
     vehicle = session.get(Vehicle, vehicle_id)
     if vehicle is None:
@@ -143,7 +168,11 @@ def get_vehicle(vehicle_id: str, session: Session = Depends(db_session)):
     return vehicle
 
 
-@app.get("/vehicles/{vehicle_id}/telemetry", response_model=list[TelemetryOut])
+@app.get(
+    "/vehicles/{vehicle_id}/telemetry",
+    response_model=list[TelemetryOut],
+    dependencies=[Depends(require_api_key)],
+)
 def get_telemetry(
     vehicle_id: str, limit: int = 100, session: Session = Depends(db_session)
 ):
@@ -196,7 +225,11 @@ async def _dispatch_gateway_command(
         return {"status": "FAILED", "mav_result": None, "error": _error_message(exc)}
 
 
-@app.post("/vehicles/{vehicle_id}/commands", response_model=CommandOut)
+@app.post(
+    "/vehicles/{vehicle_id}/commands",
+    response_model=CommandOut,
+    dependencies=[Depends(require_api_key)],
+)
 async def create_command(
     vehicle_id: str, req: CommandCreate, session: Session = Depends(db_session)
 ):
@@ -228,7 +261,11 @@ async def create_command(
     return command
 
 
-@app.get("/vehicles/{vehicle_id}/commands/{command_id}", response_model=CommandOut)
+@app.get(
+    "/vehicles/{vehicle_id}/commands/{command_id}",
+    response_model=CommandOut,
+    dependencies=[Depends(require_api_key)],
+)
 def get_command(vehicle_id: str, command_id: str, session: Session = Depends(db_session)):
     command = session.get(Command, command_id)
     if command is None or command.vehicle_id != vehicle_id:
@@ -236,7 +273,11 @@ def get_command(vehicle_id: str, command_id: str, session: Session = Depends(db_
     return command
 
 
-@app.post("/vehicles/{vehicle_id}/missions", response_model=MissionOut)
+@app.post(
+    "/vehicles/{vehicle_id}/missions",
+    response_model=MissionOut,
+    dependencies=[Depends(require_api_key)],
+)
 async def create_mission(
     vehicle_id: str, req: MissionCreate, session: Session = Depends(db_session)
 ):
@@ -272,7 +313,11 @@ async def create_mission(
     return mission
 
 
-@app.get("/vehicles/{vehicle_id}/missions", response_model=list[MissionOut])
+@app.get(
+    "/vehicles/{vehicle_id}/missions",
+    response_model=list[MissionOut],
+    dependencies=[Depends(require_api_key)],
+)
 def list_missions(vehicle_id: str, session: Session = Depends(db_session)):
     stmt = (
         select(Mission)
@@ -282,7 +327,11 @@ def list_missions(vehicle_id: str, session: Session = Depends(db_session)):
     return session.scalars(stmt).all()
 
 
-@app.get("/vehicles/{vehicle_id}/missions/{mission_id}", response_model=MissionOut)
+@app.get(
+    "/vehicles/{vehicle_id}/missions/{mission_id}",
+    response_model=MissionOut,
+    dependencies=[Depends(require_api_key)],
+)
 def get_mission(vehicle_id: str, mission_id: str, session: Session = Depends(db_session)):
     mission = session.get(Mission, mission_id)
     if mission is None or mission.vehicle_id != vehicle_id:
@@ -290,7 +339,11 @@ def get_mission(vehicle_id: str, mission_id: str, session: Session = Depends(db_
     return mission
 
 
-@app.post("/vehicles/{vehicle_id}/missions/{mission_id}/start", response_model=MissionOut)
+@app.post(
+    "/vehicles/{vehicle_id}/missions/{mission_id}/start",
+    response_model=MissionOut,
+    dependencies=[Depends(require_api_key)],
+)
 async def start_mission(
     vehicle_id: str, mission_id: str, session: Session = Depends(db_session)
 ):
@@ -328,6 +381,8 @@ async def start_mission(
 
 @app.websocket("/ws/telemetry/{vehicle_id}")
 async def telemetry_ws(websocket: WebSocket, vehicle_id: str):
+    if not await require_ws_api_key(websocket):
+        return
     await ws_manager.connect(vehicle_id, websocket)
     try:
         while True:
@@ -344,6 +399,8 @@ async def fleet_ws(websocket: WebSocket):
     """Every vehicle's telemetry over one connection -- see
     docs/adr/0009-multi-vehicle-fleet.md. Same connect/disconnect pattern
     as /ws/telemetry/{vehicle_id}, just on the reserved fleet channel."""
+    if not await require_ws_api_key(websocket):
+        return
     await ws_manager.connect(FLEET_CHANNEL, websocket)
     try:
         while True:
