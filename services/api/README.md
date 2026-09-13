@@ -40,10 +40,28 @@ A request/connection missing the key, or with the wrong one, gets a `401`
 - `GET /vehicles/{id}/missions`, `GET /vehicles/{id}/missions/{mission_id}`
 - `POST /vehicles/{id}/missions/{mission_id}/start` — sends `MISSION_START`;
   mission must be `UPLOADED` first
+- `POST /vehicles/{id}/geofence` — `{"points": [{"lat":, "lon":}, ...]}`
+  (at least 3), replaces the vehicle's fence (Phase 6a, see
+  `docs/adr/0012-geofencing-failsafe.md`)
+- `GET /vehicles/{id}/geofence`, `DELETE /vehicles/{id}/geofence`
 - `WS /ws/telemetry/{id}` — one vehicle's live telemetry stream (JSON
-  messages, including `current_waypoint_seq`)
+  messages, including `current_waypoint_seq` and `emergency_state`)
 - `WS /ws/fleet` — every vehicle's live telemetry over one connection
   (Phase 3, see `docs/adr/0009-multi-vehicle-fleet.md`)
+
+## Geofencing + failsafe (Phase 6a)
+
+Once a vehicle has a geofence (`POST /vehicles/{id}/geofence`):
+- `POST /vehicles/{id}/missions` rejects (`422`) any waypoint outside it.
+- The failsafe manager watches every incoming telemetry sample
+  (`POST /internal/telemetry`); if the vehicle is armed and its position
+  is outside the fence, it auto-issues `RTL` and sets
+  `Vehicle.emergency_state = "GEOFENCE_BREACH"` (visible on
+  `GET /vehicles/{id}` and in every telemetry WS message). This resets
+  to `"NORMAL"` once the vehicle disarms. See
+  `docs/adr/0012-geofencing-failsafe.md` for the full design and its
+  known limitations (one fence per vehicle, RTL is the only failsafe
+  action, the check runs on this software stack rather than onboard).
 
 ## Run locally
 

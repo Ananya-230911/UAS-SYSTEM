@@ -30,6 +30,14 @@ class Vehicle(Base):
     flight_mode: Mapped[str] = mapped_column(String, default="UNKNOWN")
     current_waypoint_seq: Mapped[int | None] = mapped_column(Integer, nullable=True)
     active_mission_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Phase 6a (docs/adr/0012-geofencing-failsafe.md): NORMAL or
+    # GEOFENCE_BREACH. Set by the failsafe manager in ingest_telemetry()
+    # when armed telemetry lands outside the vehicle's geofence (if any);
+    # reset to NORMAL when the vehicle disarms. Deliberately just these
+    # two states for now -- see the ADR for the fuller state machine this
+    # could grow into (e.g. a distinct "RTL_COMMANDED" state) if a second
+    # failsafe trigger is ever added.
+    emergency_state: Mapped[str] = mapped_column(String, default="NORMAL")
 
 
 class TelemetrySample(Base):
@@ -97,6 +105,23 @@ class Command(Base):
     error: Mapped[str | None] = mapped_column(String, nullable=True)
     issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class Geofence(Base):
+    """One polygon boundary per vehicle (docs/adr/0012-geofencing-failsafe.md).
+    Keyed by vehicle_id itself (not a separate id) because a vehicle has at
+    most one active fence -- POST replaces it outright, matching how
+    Mission upload replaces "the current plan" rather than layering
+    fences. points is a JSON list of {"lat":, "lon":}, at least 3 of them
+    (see schemas.GeofenceCreate)."""
+
+    __tablename__ = "geofences"
+
+    vehicle_id: Mapped[str] = mapped_column(
+        String, ForeignKey("vehicles.vehicle_id"), primary_key=True
+    )
+    points: Mapped[list] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
 class EventLogEntry(Base):

@@ -9,10 +9,13 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .db import get_session, init_db
-from .models import Command, EventLogEntry, Mission, TelemetrySample, Vehicle
+from .geofence import point_in_polygon, waypoints_outside_fence
+from .models import Command, EventLogEntry, Geofence, Mission, TelemetrySample, Vehicle
 from .schemas import (
     CommandCreate,
     CommandOut,
+    GeofenceCreate,
+    GeofenceOut,
     MissionCreate,
     MissionOut,
     TelemetryIngest,
@@ -139,12 +142,62 @@ async def ingest_telemetry(
                 detail=f"armed={sample.armed}",
             )
         )
+    if not sample.armed:
+        # Failsafe manager (docs/adr/0012-geofencing-failsafe.md): a
+        # disarmed vehicle can't be outside its fence in any way that
+        # matters, so "disarmed" is the reset condition back to NORMAL --
+        # simpler and more certain than trying to detect "back inside the
+        # fence" while still armed and possibly still moving. Checked on
+        # every disarmed sample (not just the arm->disarm transition) so
+        # a stale GEOFENCE_BREACH left over from before an API restart
+        # also clears once the vehicle is next seen disarmed.
+        vehicle.emergency_state = "NORMAL"
 
     row = TelemetrySample(timestamp=now, **sample.model_dump())
     session.add(row)
+
+    # Failsafe manager: geofence breach -> auto-RTL. Deliberately a
+    # simple, deterministic rule (not a learned/AI system -- see the ADR
+    # for why that's a separate, later piece of work), and deliberately
+    # debounced by emergency_state so a vehicle that stays outside the
+    # fence doesn't get an RTL command re-sent on every telemetry sample.
+    fence = session.get(Geofence, sample.vehicle_id)
+    breached = (
+        fence is not None
+        and sample.armed
+        and sample.lat is not None
+        and sample.lon is not None
+        and not point_in_polygon(sample.lat, sample.lon, fence.points)
+    )
+    if breached and vehicle.emergency_state != "GEOFENCE_BREACH":
+        vehicle.emergency_state = "GEOFENCE_BREACH"
+        session.add(
+            EventLogEntry(
+                vehicle_id=sample.vehicle_id,
+                timestamp=now,
+                event_type="GEOFENCE_BREACH",
+                detail=f"lat={sample.lat}, lon={sample.lon} outside fence -- auto-RTL issued",
+            )
+        )
+        session.commit()
+        result = await _dispatch_gateway_command(sample.vehicle_id, "RTL")
+        session.add(
+            EventLogEntry(
+                vehicle_id=sample.vehicle_id,
+                event_type="FAILSAFE_RTL",
+                detail=f"auto-RTL -> {result['status']}"
+                + (f" ({result['error']})" if result["error"] else ""),
+            )
+        )
+
     session.commit()
 
-    message = {"type": "telemetry", "timestamp": now.isoformat(), **sample.model_dump()}
+    message = {
+        "type": "telemetry",
+        "timestamp": now.isoformat(),
+        "emergency_state": vehicle.emergency_state,
+        **sample.model_dump(),
+    }
     await ws_manager.broadcast(sample.vehicle_id, message)
     # Phase 3: also fan out to the fleet-wide channel so the UI can show
     # every vehicle on one map without opening one socket per vehicle
@@ -282,6 +335,21 @@ async def create_mission(
     vehicle_id: str, req: MissionCreate, session: Session = Depends(db_session)
 ):
     waypoints = [wp.model_dump() for wp in req.waypoints]
+
+    # Geofence check (docs/adr/0012-geofencing-failsafe.md): reject a
+    # mission outright if the vehicle has an active fence and any
+    # waypoint falls outside it, rather than letting it upload and only
+    # catching the problem once the vehicle is already flying toward a
+    # forbidden point and the failsafe manager has to auto-RTL it.
+    fence = session.get(Geofence, vehicle_id)
+    if fence is not None:
+        bad = waypoints_outside_fence(waypoints, fence.points)
+        if bad:
+            raise HTTPException(
+                status_code=422,
+                detail=f"waypoint(s) {bad} fall outside the vehicle's geofence",
+            )
+
     mission = Mission(vehicle_id=vehicle_id, waypoints=waypoints, status="PENDING")
     session.add(mission)
     session.commit()
@@ -377,6 +445,61 @@ async def start_mission(
     session.commit()
     session.refresh(mission)
     return mission
+
+
+@app.post(
+    "/vehicles/{vehicle_id}/geofence",
+    response_model=GeofenceOut,
+    dependencies=[Depends(require_api_key)],
+)
+def set_geofence(vehicle_id: str, req: GeofenceCreate, session: Session = Depends(db_session)):
+    """Define/replace vehicle_id's geofence -- see
+    docs/adr/0012-geofencing-failsafe.md. A vehicle has at most one active
+    fence; posting a new one replaces the old one outright (same pattern
+    as re-uploading a mission)."""
+    points = [p.model_dump() for p in req.points]
+    fence = session.get(Geofence, vehicle_id)
+    if fence is None:
+        fence = Geofence(vehicle_id=vehicle_id, points=points)
+        session.add(fence)
+    else:
+        fence.points = points
+    session.add(
+        EventLogEntry(
+            vehicle_id=vehicle_id,
+            event_type="GEOFENCE_SET",
+            detail=f"{len(points)} points",
+        )
+    )
+    session.commit()
+    session.refresh(fence)
+    return fence
+
+
+@app.get(
+    "/vehicles/{vehicle_id}/geofence",
+    response_model=GeofenceOut,
+    dependencies=[Depends(require_api_key)],
+)
+def get_geofence(vehicle_id: str, session: Session = Depends(db_session)):
+    fence = session.get(Geofence, vehicle_id)
+    if fence is None:
+        raise HTTPException(status_code=404, detail="no geofence set for this vehicle")
+    return fence
+
+
+@app.delete(
+    "/vehicles/{vehicle_id}/geofence",
+    dependencies=[Depends(require_api_key)],
+)
+def delete_geofence(vehicle_id: str, session: Session = Depends(db_session)):
+    fence = session.get(Geofence, vehicle_id)
+    if fence is None:
+        raise HTTPException(status_code=404, detail="no geofence set for this vehicle")
+    session.delete(fence)
+    session.add(EventLogEntry(vehicle_id=vehicle_id, event_type="GEOFENCE_CLEARED"))
+    session.commit()
+    return {"status": "cleared"}
 
 
 @app.websocket("/ws/telemetry/{vehicle_id}")

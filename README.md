@@ -3,13 +3,13 @@
 Unmanned Aerial System — ground control, telemetry, and mission management
 software stack.
 
-## Status: Phases 1-3 implemented; Phase 4 validated real PX4 SITL; Phase 5 adds API authentication
+## Status: Phases 1-3 implemented; Phase 4 validated real PX4 SITL; Phase 5 adds API authentication; Phase 6a adds geofencing + failsafe
 
 See [`docs/PHASE_1_PLAN.md`](docs/PHASE_1_PLAN.md) for the Phase 1 plan and
-[`docs/adr/`](docs/adr/) for the architecture decisions behind all five
-phases (Phase 2's mission protocol decision is ADR-0008, Phase 3's fleet
+[`docs/adr/`](docs/adr/) for the architecture decisions behind every
+phase (Phase 2's mission protocol decision is ADR-0008, Phase 3's fleet
 decisions are ADR-0009, Phase 4's real-PX4 validation is ADR-0010, Phase
-5's API key auth is ADR-0011).
+5's API key auth is ADR-0011, Phase 6a's geofencing/failsafe is ADR-0012).
 
 Phase 1 delivers a working vertical slice end-to-end against a simulated
 vehicle: telemetry flows from a simulator through a MAVLink gateway into a
@@ -31,6 +31,11 @@ WebSocket routes) now requires a shared API key once one is configured —
 opt-in and off by default, so none of Phases 1-4's zero-config testing
 changes unless you explicitly set `API_KEY` (see
 [`docs/adr/0011-api-authentication.md`](docs/adr/0011-api-authentication.md)).
+Phase 6a adds a geofence per vehicle: draw one in the UI (or `POST
+/vehicles/{id}/geofence`) and a mission with a waypoint outside it is
+rejected up front, while a vehicle that ends up outside it while armed is
+automatically sent RTL by a failsafe manager watching live telemetry (see
+[`docs/adr/0012-geofencing-failsafe.md`](docs/adr/0012-geofencing-failsafe.md)).
 
 ```
 simulation/sitl  --MAVLink/UDP-->  telemetry-gateway  --HTTP-->  api  <--WS/REST-->  gcs-web
@@ -119,6 +124,33 @@ now fail with a `401`; with it
 (`-Headers @{"X-API-Key"="some-shared-secret"}`) it should succeed. See
 [`docs/adr/0011-api-authentication.md`](docs/adr/0011-api-authentication.md)
 and `services/api/README.md` for the full endpoint list this covers.
+
+### Try geofencing + auto-RTL (Phase 6a)
+
+In the UI, with a vehicle selected: click **Draw** under Geofence, click
+the map at least 3 times to outline a boundary, then **Save**. Two things
+to try:
+
+1. **Upload a mission with a waypoint outside that boundary** — the
+   Mission panel should show `Upload FAILED` with a `waypoint(s) [...]
+   fall outside the vehicle's geofence` error; nothing gets sent to the
+   vehicle.
+2. **Arm, take off, and fly (or manually push) the vehicle outside the
+   fence** — the Telemetry panel's "Geofence" row should switch to
+   `BREACHED — auto-RTL issued` in red, and the vehicle should start
+   flying home on its own, with no RTL button click needed. It resets to
+   `OK` once the vehicle disarms.
+
+From PowerShell, the same check without the UI:
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/vehicles/sim-1/geofence -Method Post `
+  -ContentType "application/json" `
+  -Body '{"points": [{"lat":37.427,"lon":-122.170},{"lat":37.427,"lon":-122.168},{"lat":37.429,"lon":-122.168},{"lat":37.429,"lon":-122.170}]}'
+```
+Then try uploading a mission with a waypoint far outside those bounds —
+it should come back as a `422` instead of `200`. See
+[`docs/adr/0012-geofencing-failsafe.md`](docs/adr/0012-geofencing-failsafe.md)
+for the full design.
 
 ## Quick start (Docker)
 

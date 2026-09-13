@@ -10,9 +10,13 @@ see docs/adr/0008-mission-protocol.md). Then brings up a second vehicle
 (its own gateway + simulator) and asserts a command sent to it reaches its
 own gateway and only its own gateway -- proving the multi-vehicle command
 routing added in Phase 3 actually works, not just that two vehicles can
-send telemetry (see docs/adr/0009-multi-vehicle-fleet.md). This is the CI
-gate for "the vertical slice still works" (see docs/PHASE_1_PLAN.md,
-section 8).
+send telemetry (see docs/adr/0009-multi-vehicle-fleet.md). Then sets a
+geofence around sim-1's home and confirms a mission with a waypoint
+outside it is rejected while one fully inside still uploads normally
+(Phase 6a, see docs/adr/0012-geofencing-failsafe.md -- the runtime
+auto-RTL failsafe itself is covered by services/api/tests/test_api.py,
+not duplicated here). This is the CI gate for "the vertical slice still
+works" (see docs/PHASE_1_PLAN.md, section 8).
 
 Assumes the three services' dependencies are already installed (either in
 the active interpreter, or point PYTHON at a venv's python3).
@@ -46,6 +50,19 @@ def http_post(url, payload, timeout=10):
     req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read())
+
+
+def http_post_status(url, payload, timeout=10):
+    """Like http_post, but returns (status_code, body) instead of raising
+    on a non-2xx response -- used to assert on an expected error status,
+    e.g. a geofence-violating mission upload's 422."""
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.status, json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        return exc.code, json.loads(exc.read())
 
 
 def wait_for(predicate, timeout_s, label):
@@ -204,6 +221,31 @@ def main():
             "vehicle to disarm after RTL",
         )
         print("  -> vehicle disarmed (RTL complete).")
+
+        print("Setting a geofence around home and confirming a far waypoint is rejected...")
+        fence_points = [
+            {"lat": home_lat - 0.001, "lon": home_lon - 0.001},
+            {"lat": home_lat - 0.001, "lon": home_lon + 0.001},
+            {"lat": home_lat + 0.001, "lon": home_lon + 0.001},
+            {"lat": home_lat + 0.001, "lon": home_lon - 0.001},
+        ]
+        http_post(f"{API_URL}/vehicles/{VEHICLE_ID}/geofence", {"points": fence_points})
+
+        status, body = http_post_status(
+            f"{API_URL}/vehicles/{VEHICLE_ID}/missions",
+            {"waypoints": [{"lat": home_lat + 1.0, "lon": home_lon, "alt_m": 20.0}]},
+        )
+        assert status == 422, f"expected mission outside the fence to be rejected, got {status}: {body}"
+        print(f"  -> rejected as expected: {body['detail']}")
+
+        print("Confirming a mission fully inside the same fence still uploads normally...")
+        inside_mission = http_post(
+            f"{API_URL}/vehicles/{VEHICLE_ID}/missions",
+            {"waypoints": [{"lat": home_lat + 0.0002, "lon": home_lon, "alt_m": 20.0}]},
+            timeout=40,
+        )
+        assert inside_mission["status"] == "UPLOADED", f"in-fence mission should upload: {inside_mission}"
+        print(f"  -> mission {inside_mission['mission_id']} UPLOADED")
 
         print("Bringing up a second vehicle (sim-2) to test fleet command routing...")
         spawn(

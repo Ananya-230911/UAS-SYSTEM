@@ -53,9 +53,33 @@ let draftMarkers = []; // parallel array of L.marker
 let draftPath = L.polyline([], { color: "#f59e0b", weight: 2, dashArray: "6 6" }).addTo(map);
 let currentMissionId = null;
 
+// Phase 6a (docs/adr/0012-geofencing-failsafe.md) geofence-drawing state.
+// Reuses the exact "click the map to add points" interaction Phase 2
+// already established for missions -- draftFencePoints is only staged
+// locally until Save, same lifecycle as draftWaypoints. fenceDrawMode
+// decides which one a map click feeds.
+let fenceDrawMode = false;
+let draftFencePoints = []; // [{lat, lon}]
+let draftFenceMarkers = [];
+let draftFencePolygon = L.polygon([], {
+  color: "#dc2626",
+  weight: 2,
+  dashArray: "4 4",
+  fillOpacity: 0.05,
+}).addTo(map);
+// The vehicle's currently-saved fence, loaded on selectVehicle().
+let savedFencePolygon = L.polygon([], { color: "#dc2626", weight: 2, fillOpacity: 0.08 }).addTo(
+  map
+);
+
 map.on("click", (e) => {
-  draftWaypoints.push({ lat: e.latlng.lat, lon: e.latlng.lng, alt_m: 20 });
-  renderDraftWaypoints();
+  if (fenceDrawMode) {
+    draftFencePoints.push({ lat: e.latlng.lat, lon: e.latlng.lng });
+    renderDraftFence();
+  } else {
+    draftWaypoints.push({ lat: e.latlng.lat, lon: e.latlng.lng, alt_m: 20 });
+    renderDraftWaypoints();
+  }
 });
 
 function renderDraftWaypoints() {
@@ -86,6 +110,103 @@ function renderDraftWaypoints() {
 
 function setMissionStatus(text) {
   document.getElementById("mission-status").textContent = text;
+}
+
+function setFenceStatus(text) {
+  document.getElementById("fence-status").textContent = text;
+}
+
+function renderDraftFence() {
+  draftFenceMarkers.forEach((m) => map.removeLayer(m));
+  draftFenceMarkers = draftFencePoints.map((p, i) =>
+    L.marker([p.lat, p.lon], {
+      icon: L.divIcon({ className: "fence-point-marker", iconSize: [10, 10] }),
+      title: `Fence point ${i + 1}`,
+    }).addTo(map)
+  );
+  draftFencePolygon.setLatLngs(draftFencePoints.map((p) => [p.lat, p.lon]));
+}
+
+function clearFenceDraft() {
+  draftFencePoints = [];
+  renderDraftFence();
+}
+
+function toggleFenceDrawMode() {
+  fenceDrawMode = !fenceDrawMode;
+  document.getElementById("btn-fence-draw").textContent = fenceDrawMode
+    ? "Drawing… (click Draw to stop)"
+    : "Draw";
+}
+
+async function loadFence(vehicleId) {
+  savedFencePolygon.setLatLngs([]);
+  if (!vehicleId) return;
+  try {
+    const resp = await fetch(`${API_BASE}/vehicles/${vehicleId}/geofence`, {
+      headers: authHeaders(),
+    });
+    if (resp.status === 404) {
+      setFenceStatus("No geofence set.");
+      return;
+    }
+    if (!resp.ok) return;
+    const fence = await resp.json();
+    savedFencePolygon.setLatLngs(fence.points.map((p) => [p.lat, p.lon]));
+    setFenceStatus(`Active fence: ${fence.points.length} points.`);
+  } catch (err) {
+    console.warn("failed to load geofence", err);
+  }
+}
+
+async function saveFence() {
+  if (!selectedVehicleId) {
+    setFenceStatus("Select a vehicle first.");
+    return;
+  }
+  if (draftFencePoints.length < 3) {
+    setFenceStatus("Add at least 3 points by clicking the map first.");
+    return;
+  }
+  try {
+    const resp = await fetch(`${API_BASE}/vehicles/${selectedVehicleId}/geofence`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ points: draftFencePoints }),
+    });
+    const body = await resp.json();
+    if (!resp.ok) {
+      setFenceStatus(`Save FAILED: ${body.detail || "unknown error"}`);
+      return;
+    }
+    savedFencePolygon.setLatLngs(body.points.map((p) => [p.lat, p.lon]));
+    clearFenceDraft();
+    setFenceStatus(`Active fence: ${body.points.length} points.`);
+  } catch (err) {
+    setFenceStatus(`Save FAILED: ${err}`);
+  }
+}
+
+async function deleteFence() {
+  if (!selectedVehicleId) {
+    setFenceStatus("Select a vehicle first.");
+    return;
+  }
+  try {
+    const resp = await fetch(`${API_BASE}/vehicles/${selectedVehicleId}/geofence`, {
+      method: "DELETE",
+      headers: authHeaders(),
+    });
+    if (!resp.ok && resp.status !== 404) {
+      const body = await resp.json();
+      setFenceStatus(`Delete FAILED: ${body.detail || "unknown error"}`);
+      return;
+    }
+    savedFencePolygon.setLatLngs([]);
+    setFenceStatus("No geofence set.");
+  } catch (err) {
+    setFenceStatus(`Delete FAILED: ${err}`);
+  }
 }
 
 function setStatus(state, text) {
@@ -152,6 +273,8 @@ function selectVehicle(vehicleId) {
   document.getElementById("vehicle-id").textContent = `(${vehicleId})`;
   path.setLatLngs([]);
   clearMission();
+  clearFenceDraft();
+  loadFence(vehicleId);
 
   // Re-render every marker's icon so the previously-selected vehicle drops
   // back to a plain fleet dot and the newly-selected one gets the drone icon.
@@ -187,6 +310,10 @@ function renderTelemetry(sample) {
   document.getElementById("t-waypoint").textContent =
     sample.current_waypoint_seq != null ? `#${sample.current_waypoint_seq + 1}` : "—";
   document.getElementById("t-updated").textContent = new Date(sample.timestamp).toLocaleTimeString();
+  const emergencyEl = document.getElementById("t-emergency");
+  emergencyEl.textContent =
+    sample.emergency_state === "GEOFENCE_BREACH" ? "BREACHED — auto-RTL issued" : "OK";
+  emergencyEl.classList.toggle("emergency", sample.emergency_state === "GEOFENCE_BREACH");
 
   if (sample.lat != null && sample.lon != null) {
     path.addLatLng([sample.lat, sample.lon]);
@@ -217,6 +344,7 @@ async function discoverVehicles() {
       selectVehicle(list[0].vehicle_id);
     } else if (selectedVehicleId) {
       loadHistory();
+      loadFence(selectedVehicleId); // selectVehicle() wasn't called for a URL-preselected vehicle
     }
   } catch (err) {
     console.warn("failed to discover vehicles", err);
@@ -232,7 +360,11 @@ async function loadHistory() {
     if (!resp.ok) return;
     const samples = await resp.json();
     samples.forEach((s) => {
-      vehicles[s.vehicle_id] = s;
+      // Merge, don't replace: a TelemetrySample doesn't carry
+      // emergency_state or the other vehicle-level fields GET /vehicles
+      // already seeded (see discoverVehicles()) -- overwriting outright
+      // would silently forget them.
+      vehicles[s.vehicle_id] = { ...vehicles[s.vehicle_id], ...s };
       updateFleetMarker(s.vehicle_id, s);
       renderTelemetry(s);
     });
@@ -352,6 +484,11 @@ document.getElementById("btn-rtl").addEventListener("click", () => sendCommand("
 document.getElementById("btn-mission-clear").addEventListener("click", clearMission);
 document.getElementById("btn-mission-upload").addEventListener("click", uploadMission);
 document.getElementById("btn-mission-start").addEventListener("click", startMission);
+
+document.getElementById("btn-fence-draw").addEventListener("click", toggleFenceDrawMode);
+document.getElementById("btn-fence-clear").addEventListener("click", clearFenceDraft);
+document.getElementById("btn-fence-save").addEventListener("click", saveFence);
+document.getElementById("btn-fence-delete").addEventListener("click", deleteFence);
 
 setStatus("unknown", "connecting…");
 if (selectedVehicleId) {

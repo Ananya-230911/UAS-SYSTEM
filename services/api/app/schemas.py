@@ -37,6 +37,7 @@ class VehicleOut(BaseModel):
     flight_mode: str
     current_waypoint_seq: int | None = None
     active_mission_id: str | None = None
+    emergency_state: str = "NORMAL"
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -78,5 +79,24 @@ class MissionOut(BaseModel):
     error: str | None = None
     created_at: datetime
     started_at: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class GeofencePoint(BaseModel):
+    lat: float
+    lon: float
+
+
+class GeofenceCreate(BaseModel):
+    # A polygon needs at least 3 points to enclose any area at all -- see
+    # docs/adr/0012-geofencing-failsafe.md.
+    points: list[GeofencePoint] = Field(min_length=3)
+
+
+class GeofenceOut(BaseModel):
+    vehicle_id: str
+    points: list[dict]
+    created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

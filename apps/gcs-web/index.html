@@ -2,14 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>UAS-SYSTEM — GCS (Phase 3)</title>
+  <title>UAS-SYSTEM — GCS (Phase 6a)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <header>
-    <h1>UAS-SYSTEM <span class="phase-tag">Phase 3</span></h1>
+    <h1>UAS-SYSTEM <span class="phase-tag">Phase 6a</span></h1>
     <div id="connection-status" class="status status--unknown">connecting…</div>
   </header>
 
@@ -35,6 +35,7 @@
           <dt>Position</dt><dd id="t-pos">—</dd>
           <dt>Waypoint</dt><dd id="t-waypoint">—</dd>
           <dt>Last update</dt><dd id="t-updated">—</dd>
+          <dt>Geofence</dt><dd id="t-emergency">—</dd>
         </dl>
       </section>
 
@@ -59,6 +60,23 @@
           <button id="btn-mission-start">Start</button>
         </div>
         <div id="mission-status">No mission uploaded.</div>
+      </section>
+
+      <section>
+        <h2>Geofence</h2>
+        <p class="hint" id="geofence-hint">
+          Click "Draw" then click the map to add fence points (at least 3),
+          then Save. A mission with a waypoint outside the fence is
+          rejected; a vehicle that flies outside it while armed is
+          auto-RTL'd.
+        </p>
+        <div class="button-row">
+          <button id="btn-fence-draw">Draw</button>
+          <button id="btn-fence-clear">Clear draft</button>
+          <button id="btn-fence-save">Save</button>
+          <button id="btn-fence-delete">Delete</button>
+        </div>
+        <div id="fence-status">No geofence set.</div>
       </section>
     </aside>
   </main>

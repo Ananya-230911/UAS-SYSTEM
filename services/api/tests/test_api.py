@@ -27,6 +27,7 @@ class FakeAsyncClient:
     /command and /mission have different success-body shapes."""
 
     last_request = None
+    request_log: list = []  # every (url, json) post() has seen -- reset per test that reads it
     mission_response = FakeResponse(200, {"accepted": True, "count": 1})
     command_response = FakeResponse(200, {"acked": True, "mav_result": 0})
 
@@ -41,6 +42,7 @@ class FakeAsyncClient:
 
     async def post(self, url, json=None):
         FakeAsyncClient.last_request = (url, json)
+        FakeAsyncClient.request_log.append((url, json))
         if url.endswith("/mission"):
             return FakeAsyncClient.mission_response
         return FakeAsyncClient.command_response
@@ -404,3 +406,186 @@ def test_fleet_ws_requires_key_via_query_param_when_set(client, monkeypatch):
         )
         message = ws.receive_json()
         assert message["vehicle_id"] == "auth-test"
+
+
+# --- Phase 6a: geofencing + failsafe manager (docs/adr/0012-geofencing-failsafe.md) ---
+
+# A 1-degree square around the simulator's Stanford-area default home
+# (simulation/sitl/sim.py) -- same shape used in test_geofence.py, just
+# exercised here through the actual HTTP endpoints.
+FENCE_POINTS = [
+    {"lat": 37.0, "lon": -123.0},
+    {"lat": 37.0, "lon": -122.0},
+    {"lat": 38.0, "lon": -122.0},
+    {"lat": 38.0, "lon": -123.0},
+]
+
+
+def test_set_get_delete_geofence(client):
+    resp = client.post("/vehicles/fence-test-a/geofence", json={"points": FENCE_POINTS})
+    assert resp.status_code == 200
+    assert resp.json()["vehicle_id"] == "fence-test-a"
+    assert len(resp.json()["points"]) == 4
+
+    got = client.get("/vehicles/fence-test-a/geofence")
+    assert got.status_code == 200
+    assert got.json()["points"] == resp.json()["points"]
+
+    deleted = client.delete("/vehicles/fence-test-a/geofence")
+    assert deleted.status_code == 200
+
+    gone = client.get("/vehicles/fence-test-a/geofence")
+    assert gone.status_code == 404
+
+
+def test_geofence_requires_at_least_three_points(client):
+    resp = client.post(
+        "/vehicles/fence-test-b/geofence",
+        json={"points": [{"lat": 37.0, "lon": -122.0}, {"lat": 38.0, "lon": -122.0}]},
+    )
+    assert resp.status_code == 422  # pydantic min_length=3 validation
+
+
+def test_mission_upload_rejects_waypoint_outside_fence(client):
+    client.post("/vehicles/fence-test-c/geofence", json={"points": FENCE_POINTS})
+    resp = client.post(
+        "/vehicles/fence-test-c/missions",
+        json={
+            "waypoints": [
+                {"lat": 37.5, "lon": -122.5, "alt_m": 20},  # inside
+                {"lat": 50.0, "lon": -122.5, "alt_m": 20},  # outside
+            ]
+        },
+    )
+    assert resp.status_code == 422
+    assert "outside" in resp.json()["detail"]
+
+
+def test_mission_upload_succeeds_when_every_waypoint_is_inside_fence(client, monkeypatch):
+    monkeypatch.setattr("app.main.httpx.AsyncClient", FakeAsyncClient)
+    client.post("/vehicles/fence-test-d/geofence", json={"points": FENCE_POINTS})
+    resp = client.post(
+        "/vehicles/fence-test-d/missions",
+        json={"waypoints": [{"lat": 37.5, "lon": -122.5, "alt_m": 20}]},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "UPLOADED"
+
+
+def test_vehicle_with_no_fence_is_unaffected_by_mission_or_telemetry_checks(client, monkeypatch):
+    # Regression guard: a vehicle that never had a geofence set must
+    # behave exactly like Phase 1-5 -- no 422s, no auto-RTL, ever.
+    monkeypatch.setattr("app.main.httpx.AsyncClient", FakeAsyncClient)
+    resp = client.post(
+        "/vehicles/no-fence-vehicle/missions",
+        json={"waypoints": [{"lat": 89.9, "lon": 179.9, "alt_m": 20}]},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "UPLOADED"
+
+    client.post(
+        "/internal/telemetry",
+        json={
+            "vehicle_id": "no-fence-vehicle",
+            "armed": True,
+            "flight_mode": "MISSION",
+            "lat": 89.9,
+            "lon": 179.9,
+        },
+        headers={"X-Internal-Token": "test-secret"},
+    )
+    vehicle = client.get("/vehicles/no-fence-vehicle").json()
+    assert vehicle["emergency_state"] == "NORMAL"
+
+
+def test_geofence_breach_triggers_auto_rtl_and_sets_emergency_state(client, monkeypatch):
+    monkeypatch.setattr("app.main.httpx.AsyncClient", FakeAsyncClient)
+    FakeAsyncClient.request_log = []
+    client.post("/vehicles/breach-test/geofence", json={"points": FENCE_POINTS})
+
+    # Armed and outside the fence -> the failsafe manager should issue RTL.
+    resp = client.post(
+        "/internal/telemetry",
+        json={
+            "vehicle_id": "breach-test",
+            "armed": True,
+            "flight_mode": "MISSION",
+            "lat": 50.0,
+            "lon": -122.5,
+        },
+        headers={"X-Internal-Token": "test-secret"},
+    )
+    assert resp.status_code == 200
+
+    vehicle = client.get("/vehicles/breach-test").json()
+    assert vehicle["emergency_state"] == "GEOFENCE_BREACH"
+
+    rtl_calls = [req for req in FakeAsyncClient.request_log if req[1] and req[1].get("type") == "RTL"]
+    assert len(rtl_calls) == 1
+
+
+def test_geofence_breach_does_not_retrigger_rtl_on_every_subsequent_sample(client, monkeypatch):
+    # Debounce guard: once GEOFENCE_BREACH is set, staying outside the
+    # fence on later samples must not keep re-issuing RTL.
+    monkeypatch.setattr("app.main.httpx.AsyncClient", FakeAsyncClient)
+    FakeAsyncClient.request_log = []
+    client.post("/vehicles/breach-repeat/geofence", json={"points": FENCE_POINTS})
+
+    for _ in range(3):
+        client.post(
+            "/internal/telemetry",
+            json={
+                "vehicle_id": "breach-repeat",
+                "armed": True,
+                "flight_mode": "MISSION",
+                "lat": 50.0,
+                "lon": -122.5,
+            },
+            headers={"X-Internal-Token": "test-secret"},
+        )
+
+    rtl_calls = [req for req in FakeAsyncClient.request_log if req[1] and req[1].get("type") == "RTL"]
+    assert len(rtl_calls) == 1
+
+
+def test_emergency_state_resets_when_vehicle_disarms(client, monkeypatch):
+    monkeypatch.setattr("app.main.httpx.AsyncClient", FakeAsyncClient)
+    client.post("/vehicles/breach-reset/geofence", json={"points": FENCE_POINTS})
+
+    client.post(
+        "/internal/telemetry",
+        json={
+            "vehicle_id": "breach-reset",
+            "armed": True,
+            "flight_mode": "MISSION",
+            "lat": 50.0,
+            "lon": -122.5,
+        },
+        headers={"X-Internal-Token": "test-secret"},
+    )
+    assert client.get("/vehicles/breach-reset").json()["emergency_state"] == "GEOFENCE_BREACH"
+
+    client.post(
+        "/internal/telemetry",
+        json={"vehicle_id": "breach-reset", "armed": False, "flight_mode": "STANDBY"},
+        headers={"X-Internal-Token": "test-secret"},
+    )
+    assert client.get("/vehicles/breach-reset").json()["emergency_state"] == "NORMAL"
+
+
+def test_geofence_endpoints_require_api_key_when_set(client, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "api_key", "s3cret")
+    assert (
+        client.post("/vehicles/fence-auth/geofence", json={"points": FENCE_POINTS}).status_code
+        == 401
+    )
+    assert (
+        client.post(
+            "/vehicles/fence-auth/geofence",
+            json={"points": FENCE_POINTS},
+            headers={"X-API-Key": "s3cret"},
+        ).status_code
+        == 200
+    )

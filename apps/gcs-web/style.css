@@ -237,3 +237,22 @@ main {
 .fleet-marker.selected.armed {
   background: #2563eb;
 }
+
+.fence-point-marker {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #dc2626;
+  border: 2px solid white;
+  box-shadow: 0 0 2px rgba(0,0,0,0.4);
+}
+
+#fence-status {
+  font-size: 0.8rem;
+  color: #475569;
+}
+
+#t-emergency.emergency {
+  color: #dc2626;
+  font-weight: 600;
+}
