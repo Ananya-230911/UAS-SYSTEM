@@ -58,11 +58,25 @@ it home with RTL.
 ### Quick start on Windows (PowerShell)
 
 `scripts/run_local.sh` is a bash script and won't run natively in
-PowerShell. Run the same four components as separate terminals instead —
-**start them in this order** (API → gateway → simulator), each `cd`'d into
-the service's own directory (each service's package lives *inside* that
-directory — e.g. the API's package is `app`, not `api`, and only resolves
-when the working directory is `services/api`):
+PowerShell. There's a one-command equivalent that does the same 4 steps
+for you — starts the API, gateway, simulator, and UI each in their own
+new window, in the right order, waiting for each to come up before
+starting the next:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run_local.ps1
+```
+
+Then open `http://localhost:8080/?api=http://localhost:8000`. Single
+vehicle only — for a second vehicle, add the two extra terminals from
+the "Want a second vehicle" section below by hand alongside it.
+
+If you'd rather run (or debug) each piece yourself, here are the same
+four components as separate terminals — **start them in this order**
+(API → gateway → simulator), each `cd`'d into the service's own
+directory (each service's package lives *inside* that directory — e.g.
+the API's package is `app`, not `api`, and only resolves when the
+working directory is `services/api`):
 
 ```powershell
 # Terminal 1 -- API
