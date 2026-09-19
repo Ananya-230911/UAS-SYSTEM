@@ -133,6 +133,29 @@ def test_create_command_calls_gateway_and_records_result(client, monkeypatch):
     assert fetched.json()["command_type"] == "ARM"
 
 
+def test_command_nack_reports_a_descriptive_error_not_unknown_error(client, monkeypatch):
+    # Regression test: a NACK (gateway responds 200, but acked: false --
+    # e.g. the vehicle rejected the command because it's mid-RTL or busy
+    # with another command) previously left error=None, which the UI
+    # then showed as a bare, useless "unknown error" -- indistinguishable
+    # from an actual crash. This was observed live: TAKEOFF right after
+    # an auto-issued failsafe RTL came back as "TAKEOFF FAILED: unknown
+    # error" with no hint that the vehicle was simply busy handling RTL.
+    class NackingClient(FakeAsyncClient):
+        async def post(self, url, json=None):
+            FakeAsyncClient.last_request = (url, json)
+            return FakeResponse(200, {"acked": False, "mav_result": 4})
+
+    monkeypatch.setattr("app.main.httpx.AsyncClient", NackingClient)
+
+    resp = client.post("/vehicles/sim-1/commands", json={"type": "TAKEOFF", "altitude_m": 20})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "FAILED"
+    assert body["error"]
+    assert "4" in body["error"]  # the mav_result is surfaced, not swallowed
+
+
 def test_create_mission_rejects_empty_waypoints(client):
     resp = client.post("/vehicles/sim-1/missions", json={"waypoints": []})
     assert resp.status_code == 422

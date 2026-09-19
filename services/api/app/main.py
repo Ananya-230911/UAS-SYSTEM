@@ -264,10 +264,19 @@ async def _dispatch_gateway_command(
             )
         if resp.status_code == 200:
             body = resp.json()
+            acked = bool(body.get("acked"))
             return {
-                "status": "ACKED" if body.get("acked") else "FAILED",
+                "status": "ACKED" if acked else "FAILED",
                 "mav_result": body.get("mav_result"),
-                "error": None,
+                # A NACK (gateway responded 200, but the vehicle didn't
+                # acknowledge the command -- e.g. rejected because it's
+                # mid-RTL or another command is in flight) previously left
+                # error=None here, which the UI's `error || detail ||
+                # "unknown error"` fallback then showed as a bare, useless
+                # "unknown error" -- indistinguishable from a real crash,
+                # same failure mode _error_message() below already fixed
+                # for the exception path, just not for this one.
+                "error": None if acked else f"command not acknowledged (mav_result={body.get('mav_result')})",
             }
         return {
             "status": "FAILED",
