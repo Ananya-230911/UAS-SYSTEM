@@ -323,6 +323,13 @@ main {
 
 #spawn-panel {
   margin-top: 0.5rem;
+}
+
+/* :not([hidden]) matters here -- an ID selector's display:flex would
+   otherwise outrank the browser's built-in [hidden] { display: none },
+   defeating index.html's `hidden` attribute and showing this panel with
+   blank fields before "Pick location" is ever clicked. */
+#spawn-panel:not([hidden]) {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
