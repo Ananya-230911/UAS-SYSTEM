@@ -14,9 +14,38 @@
   </header>
 
   <main>
-    <div id="map"></div>
+    <div id="map">
+      <div id="map-search">
+        <input
+          type="text"
+          id="map-search-input"
+          placeholder="Search a place (e.g. Mumbai, Heathrow Airport)…"
+        />
+        <button id="btn-map-search">Search</button>
+        <span id="map-search-status"></span>
+      </div>
+    </div>
 
     <aside id="panel">
+      <section>
+        <h2>Add a Vehicle</h2>
+        <p class="hint">
+          Click "Pick location", then click the map where the new
+          simulated vehicle should start. This doesn't launch anything by
+          itself -- it gives you the exact commands to run in a new
+          terminal, using the location you picked as that vehicle's home.
+        </p>
+        <div class="button-row">
+          <button id="btn-spawn-pick">Pick location</button>
+        </div>
+        <div id="spawn-panel" hidden>
+          <label>Vehicle ID <input type="text" id="spawn-vehicle-id" /></label>
+          <label>API port <input type="number" id="spawn-api-port" /></label>
+          <label>Gateway port <input type="number" id="spawn-gateway-port" /></label>
+          <label>MAVLink port <input type="number" id="spawn-mavlink-port" /></label>
+          <pre id="spawn-commands" class="code-output"></pre>
+        </div>
+      </section>
       <section>
         <h2>Fleet</h2>
         <div id="fleet-list"><p class="hint">Waiting for vehicles…</p></div>

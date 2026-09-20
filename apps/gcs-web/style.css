@@ -49,6 +49,39 @@ main {
 #map {
   flex: 1;
   min-width: 0;
+  position: relative;
+}
+
+#map-search {
+  position: absolute;
+  top: 10px;
+  left: 50px; /* clear of Leaflet's zoom control */
+  z-index: 1000;
+  background: white;
+  padding: 0.4rem;
+  border-radius: 6px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  max-width: min(420px, calc(100% - 70px));
+}
+
+#map-search-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+}
+
+#map-search-status {
+  font-size: 0.7rem;
+  color: #64748b;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 #panel {
@@ -278,4 +311,34 @@ main {
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.spawn-marker {
+  font-size: 20px;
+  line-height: 20px;
+  text-align: center;
+  color: #f59e0b;
+  text-shadow: 0 0 2px white, 0 0 2px white;
+}
+
+#spawn-panel {
+  margin-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+#spawn-panel label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.8rem;
+  gap: 0.5rem;
+}
+
+#spawn-panel input {
+  width: 8rem;
+  padding: 0.2rem 0.4rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
 }

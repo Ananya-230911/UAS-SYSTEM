@@ -3,14 +3,16 @@
 Unmanned Aerial System — ground control, telemetry, and mission management
 software stack.
 
-## Status: Phases 1-3 implemented; Phase 4 validated real PX4 SITL; Phase 5 adds API authentication; Phase 6a adds geofencing + failsafe; Phase 6b adds risk monitoring + Remote ID
+## Status: Phases 1-6b complete (the full original roadmap) + a map search / vehicle spawn helper
 
 See [`docs/PHASE_1_PLAN.md`](docs/PHASE_1_PLAN.md) for the Phase 1 plan and
 [`docs/adr/`](docs/adr/) for the architecture decisions behind every
 phase (Phase 2's mission protocol decision is ADR-0008, Phase 3's fleet
 decisions are ADR-0009, Phase 4's real-PX4 validation is ADR-0010, Phase
 5's API key auth is ADR-0011, Phase 6a's geofencing/failsafe is ADR-0012,
-Phase 6b's risk monitoring/Remote ID is ADR-0013).
+Phase 6b's risk monitoring/Remote ID is ADR-0013). There is no Phase 7 —
+the roadmap is done; ADR-0014 (map search + vehicle spawn helper) is a
+UX/tooling addition made after it, not a new phase.
 
 Phase 1 delivers a working vertical slice end-to-end against a simulated
 vehicle: telemetry flows from a simulator through a MAVLink gateway into a
@@ -194,6 +196,27 @@ Invoke-RestMethod http://127.0.0.1:8000/vehicles/sim-1/remote_id
 ```
 See [`docs/adr/0013-risk-monitoring-and-remote-id.md`](docs/adr/0013-risk-monitoring-and-remote-id.md)
 for the full design and what this does/doesn't simulate.
+
+### Search anywhere on the map / start a vehicle somewhere else
+
+Type a place into the search box at the top of the map (e.g. "Mumbai",
+"Heathrow Airport") and press Enter — the map recenters there. This
+only changes what you're looking at; it doesn't move any vehicle.
+
+To start a **new** simulated vehicle somewhere else: in the **Add a
+Vehicle** panel, click **Pick location**, then click the map where you
+want it to start. This fills in a suggested vehicle ID and ports, and
+shows the exact commands to run in two new terminals — copy them,
+adjusting the vehicle ID/ports if you already used them for another
+vehicle. See
+[`docs/adr/0014-map-search-and-vehicle-spawn-helper.md`](docs/adr/0014-map-search-and-vehicle-spawn-helper.md).
+
+To start your **first** (single) vehicle somewhere other than the
+Stanford default without using the UI, `run_local.ps1` also takes
+optional coordinates:
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run_local.ps1 -HomeLat 19.0760 -HomeLon 72.8777
+```
 
 ## Quick start (Docker)
 

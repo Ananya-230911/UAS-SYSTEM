@@ -21,14 +21,44 @@
     docs/adr/0011-api-authentication.md), it's inherited by every spawned
     window automatically -- nothing extra to pass.
 
+.PARAMETER HomeLat
+    Latitude the simulator starts flying from. Defaults to sim.py's own
+    default (Stanford, CA) if not given -- same as running sim.py with
+    no --home-lat/--home-lon flags at all.
+
+.PARAMETER HomeLon
+    Longitude the simulator starts flying from. See HomeLat.
+
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File scripts\run_local.ps1
+
+.EXAMPLE
+    # Start the vehicle over Mumbai instead of the Stanford default --
+    # e.g. lat/lon picked from the GCS UI's map search or "Add a
+    # Vehicle" location picker.
+    powershell -ExecutionPolicy Bypass -File scripts\run_local.ps1 -HomeLat 19.0760 -HomeLon 72.8777
 #>
+
+param(
+    [double]$HomeLat,
+    [double]$HomeLon
+)
 
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
 $venvPython = Join-Path $root ".venv\Scripts\python.exe"
+
+# Only pass --home-lat/--home-lon through if the caller actually gave
+# both -- omitting them entirely lets sim.py fall back to its own
+# defaults, rather than this script silently picking a value for
+# whichever one wasn't provided.
+$homeArgs = ""
+if ($PSBoundParameters.ContainsKey("HomeLat") -and $PSBoundParameters.ContainsKey("HomeLon")) {
+    $homeArgs = "--home-lat $HomeLat --home-lon $HomeLon"
+} elseif ($PSBoundParameters.ContainsKey("HomeLat") -or $PSBoundParameters.ContainsKey("HomeLon")) {
+    throw "Pass both -HomeLat and -HomeLon together, or neither."
+}
 
 if (-not (Test-Path $venvPython)) {
     throw "Couldn't find $venvPython -- create the venv first (see README's Quick Start on Windows)."
@@ -67,7 +97,7 @@ Write-Host "Gateway is up."
 Write-Host "Starting simulator..."
 Start-Process powershell -ArgumentList @(
     "-NoExit", "-Command",
-    "cd '$root'; & '$venvPython' simulation\sitl\sim.py --target-host 127.0.0.1 --target-port 14550"
+    "cd '$root'; & '$venvPython' simulation\sitl\sim.py --target-host 127.0.0.1 --target-port 14550 $homeArgs"
 )
 
 # Poll the gateway's own health check for mavlink_connected -- that's the

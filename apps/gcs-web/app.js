@@ -72,8 +72,19 @@ let savedFencePolygon = L.polygon([], { color: "#dc2626", weight: 2, fillOpacity
   map
 );
 
+// "Add a Vehicle" spawn-location picker. Takes priority over fence/
+// mission map clicks while active -- it's a one-shot mode (armed by
+// btn-spawn-pick, consumed by the very next map click) rather than a
+// persistent toggle like fenceDrawMode, since picking one spawn point
+// is the whole interaction.
+let spawnPickMode = false;
+let spawnMarker = null;
+
 map.on("click", (e) => {
-  if (fenceDrawMode) {
+  if (spawnPickMode) {
+    spawnPickMode = false;
+    handleSpawnLocationPicked(e.latlng.lat, e.latlng.lng);
+  } else if (fenceDrawMode) {
     draftFencePoints.push({ lat: e.latlng.lat, lon: e.latlng.lng });
     renderDraftFence();
   } else {
@@ -232,6 +243,100 @@ async function fetchRemoteId() {
   } catch (err) {
     output.textContent = `Fetch FAILED: ${err}`;
   }
+}
+
+// --- Map location search (Nominatim/OpenStreetMap geocoding, no API key
+// needed -- consistent with this page already using OSM's free tile
+// server). Purely a viewport change: it moves what part of the world
+// you're looking at, it never creates, moves, or affects any vehicle. ---
+
+async function searchMapLocation() {
+  const input = document.getElementById("map-search-input");
+  const status = document.getElementById("map-search-status");
+  const query = input.value.trim();
+  if (!query) return;
+  status.textContent = "Searching…";
+  try {
+    const resp = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(query)}`
+    );
+    const results = await resp.json();
+    if (!results.length) {
+      status.textContent = `No match for "${query}".`;
+      return;
+    }
+    const { lat, lon, display_name } = results[0];
+    map.setView([parseFloat(lat), parseFloat(lon)], 13);
+    status.textContent = display_name;
+  } catch (err) {
+    status.textContent = `Search failed: ${err}`;
+  }
+}
+
+// --- "Add a Vehicle": pick a spawn location on the map, then generate
+// the exact commands to start a new gateway+simulator pair there. This
+// page has no way to launch OS processes itself (it's a static file
+// served to the browser -- see docs/adr/0005-frontend-stack.md), so it
+// deliberately hands back copy-pasteable commands rather than
+// pretending to spawn anything itself. ---
+
+function suggestNextVehicleSlot() {
+  // Best-effort defaults from how many vehicles are already known --
+  // matches the port scheme the README's "second vehicle" walkthrough
+  // already uses (8001/14550 for the first extra gateway, 8002/14551
+  // for the next, ...). The user can freely edit these before copying.
+  const knownCount = Object.keys(vehicles).length;
+  return {
+    vehicleId: `sim-${knownCount + 1}`,
+    apiPort: parseInt(new URL(API_BASE).port || "8000", 10),
+    gatewayPort: 8000 + knownCount + 1,
+    mavlinkPort: 14550 + knownCount,
+  };
+}
+
+function handleSpawnLocationPicked(lat, lon) {
+  if (spawnMarker) map.removeLayer(spawnMarker);
+  spawnMarker = L.marker([lat, lon], {
+    icon: L.divIcon({ className: "spawn-marker", html: "★", iconSize: [20, 20] }),
+  }).addTo(map);
+
+  const suggestion = suggestNextVehicleSlot();
+  document.getElementById("spawn-vehicle-id").value = suggestion.vehicleId;
+  document.getElementById("spawn-api-port").value = suggestion.apiPort;
+  document.getElementById("spawn-gateway-port").value = suggestion.gatewayPort;
+  document.getElementById("spawn-mavlink-port").value = suggestion.mavlinkPort;
+  document.getElementById("spawn-panel").hidden = false;
+  document.getElementById("spawn-panel").dataset.lat = lat;
+  document.getElementById("spawn-panel").dataset.lon = lon;
+  renderSpawnCommands();
+}
+
+function renderSpawnCommands() {
+  const panel = document.getElementById("spawn-panel");
+  const lat = panel.dataset.lat;
+  const lon = panel.dataset.lon;
+  if (lat === undefined) return;
+
+  const vehicleId = document.getElementById("spawn-vehicle-id").value.trim() || "sim-2";
+  const apiPort = document.getElementById("spawn-api-port").value || "8000";
+  const gatewayPort = document.getElementById("spawn-gateway-port").value || "8002";
+  const mavlinkPort = document.getElementById("spawn-mavlink-port").value || "14551";
+
+  document.getElementById("spawn-commands").textContent =
+`# Terminal -- new gateway for ${vehicleId}
+cd services\\telemetry-gateway
+$env:API_BASE_URL = "http://127.0.0.1:${apiPort}"
+$env:VEHICLE_ID = "${vehicleId}"
+$env:GATEWAY_MAVLINK_PORT = "${mavlinkPort}"
+python -m uvicorn gateway.main:app --host 0.0.0.0 --port ${gatewayPort}
+
+# Terminal -- new simulator for ${vehicleId}, starting where you clicked
+python simulation\\sitl\\sim.py --target-host 127.0.0.1 --target-port ${mavlinkPort} --home-lat ${lat} --home-lon ${lon}
+
+# Restart your API (Terminal 1) with this vehicle's gateway registered.
+# If you already have other extra vehicles, merge this entry into your
+# existing GATEWAY_URLS_JSON instead of replacing it.
+$env:GATEWAY_URLS_JSON = '{"${vehicleId}": "http://127.0.0.1:${gatewayPort}"}'`;
 }
 
 function setStatus(state, text) {
@@ -527,6 +632,18 @@ document.getElementById("btn-fence-clear").addEventListener("click", clearFenceD
 document.getElementById("btn-fence-save").addEventListener("click", saveFence);
 document.getElementById("btn-fence-delete").addEventListener("click", deleteFence);
 document.getElementById("btn-remote-id-fetch").addEventListener("click", fetchRemoteId);
+
+document.getElementById("btn-map-search").addEventListener("click", searchMapLocation);
+document.getElementById("map-search-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") searchMapLocation();
+});
+
+document.getElementById("btn-spawn-pick").addEventListener("click", () => {
+  spawnPickMode = true;
+});
+["spawn-vehicle-id", "spawn-api-port", "spawn-gateway-port", "spawn-mavlink-port"].forEach((id) => {
+  document.getElementById(id).addEventListener("input", renderSpawnCommands);
+});
 
 setStatus("unknown", "connecting…");
 if (selectedVehicleId) {
