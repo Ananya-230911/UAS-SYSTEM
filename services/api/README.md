@@ -44,8 +44,12 @@ A request/connection missing the key, or with the wrong one, gets a `401`
   (at least 3), replaces the vehicle's fence (Phase 6a, see
   `docs/adr/0012-geofencing-failsafe.md`)
 - `GET /vehicles/{id}/geofence`, `DELETE /vehicles/{id}/geofence`
+- `GET /vehicles/{id}/remote_id` — simulated Remote ID broadcast content
+  for this vehicle right now (Phase 6b, see
+  `docs/adr/0013-risk-monitoring-and-remote-id.md`)
 - `WS /ws/telemetry/{id}` — one vehicle's live telemetry stream (JSON
-  messages, including `current_waypoint_seq` and `emergency_state`)
+  messages, including `current_waypoint_seq`, `emergency_state`,
+  `risk_level`, and `risk_flags`)
 - `WS /ws/fleet` — every vehicle's live telemetry over one connection
   (Phase 3, see `docs/adr/0009-multi-vehicle-fleet.md`)
 
@@ -62,6 +66,22 @@ Once a vehicle has a geofence (`POST /vehicles/{id}/geofence`):
   `docs/adr/0012-geofencing-failsafe.md` for the full design and its
   known limitations (one fence per vehicle, RTL is the only failsafe
   action, the check runs on this software stack rather than onboard).
+
+## Risk monitoring + Remote ID (Phase 6b)
+
+Every telemetry ingest also recomputes `Vehicle.risk_level`
+(`LOW`/`MEDIUM`/`HIGH`) and `risk_flags` (a list naming which of
+`RAPID_BATTERY_DRAIN`, `GPS_DEGRADED`, `UNEXPECTED_ALTITUDE_DROP`, or
+`ABNORMAL_SPEED` fired) via a small set of heuristic rules
+(`app/risk_monitor.py`) — visible on `GET /vehicles/{id}` and in every
+telemetry WS message. **Advisory only**: unlike the geofence failsafe
+above, this never issues a command; it's for a human operator to notice
+and act on. `GET /vehicles/{id}/remote_id` returns a payload shaped
+like the fields a real drone's Remote ID broadcast carries (identity,
+position, speed, an operator-location stand-in, emergency status) —
+built from data this project already has, not an actual radio
+transmission. See `docs/adr/0013-risk-monitoring-and-remote-id.md` for
+the full design and known limitations of both.
 
 ## Run locally
 

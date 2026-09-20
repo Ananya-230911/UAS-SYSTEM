@@ -3,13 +3,14 @@
 Unmanned Aerial System — ground control, telemetry, and mission management
 software stack.
 
-## Status: Phases 1-3 implemented; Phase 4 validated real PX4 SITL; Phase 5 adds API authentication; Phase 6a adds geofencing + failsafe
+## Status: Phases 1-3 implemented; Phase 4 validated real PX4 SITL; Phase 5 adds API authentication; Phase 6a adds geofencing + failsafe; Phase 6b adds risk monitoring + Remote ID
 
 See [`docs/PHASE_1_PLAN.md`](docs/PHASE_1_PLAN.md) for the Phase 1 plan and
 [`docs/adr/`](docs/adr/) for the architecture decisions behind every
 phase (Phase 2's mission protocol decision is ADR-0008, Phase 3's fleet
 decisions are ADR-0009, Phase 4's real-PX4 validation is ADR-0010, Phase
-5's API key auth is ADR-0011, Phase 6a's geofencing/failsafe is ADR-0012).
+5's API key auth is ADR-0011, Phase 6a's geofencing/failsafe is ADR-0012,
+Phase 6b's risk monitoring/Remote ID is ADR-0013).
 
 Phase 1 delivers a working vertical slice end-to-end against a simulated
 vehicle: telemetry flows from a simulator through a MAVLink gateway into a
@@ -36,6 +37,13 @@ Phase 6a adds a geofence per vehicle: draw one in the UI (or `POST
 rejected up front, while a vehicle that ends up outside it while armed is
 automatically sent RTL by a failsafe manager watching live telemetry (see
 [`docs/adr/0012-geofencing-failsafe.md`](docs/adr/0012-geofencing-failsafe.md)).
+Phase 6b closes out the rest of the original Phase 6 brief: a heuristic
+risk monitor flags unusual telemetry (rapid battery drain, degraded GPS,
+a sudden altitude drop, abnormal speed) as advisory `LOW`/`MEDIUM`/`HIGH`
+flags an operator can see but that never auto-command the vehicle, and a
+Remote ID simulator exposes the fields a real drone's identity/location
+broadcast would carry (see
+[`docs/adr/0013-risk-monitoring-and-remote-id.md`](docs/adr/0013-risk-monitoring-and-remote-id.md)).
 
 ```
 simulation/sitl  --MAVLink/UDP-->  telemetry-gateway  --HTTP-->  api  <--WS/REST-->  gcs-web
@@ -165,6 +173,27 @@ Then try uploading a mission with a waypoint far outside those bounds —
 it should come back as a `422` instead of `200`. See
 [`docs/adr/0012-geofencing-failsafe.md`](docs/adr/0012-geofencing-failsafe.md)
 for the full design.
+
+### Try risk monitoring + Remote ID (Phase 6b)
+
+With a vehicle selected, the Telemetry panel's **Risk** row updates
+automatically as telemetry arrives — normally `LOW`; watch it change to
+`MEDIUM`/`HIGH` with a flag name (e.g. `GPS_DEGRADED`) if you set
+`gps_fix_type`/battery/speed to unusual values via a direct
+`POST /internal/telemetry` call, or just let a real flight play out
+(nothing in the simulator is scripted to trigger these, so most normal
+flights should stay `LOW`). This never changes the vehicle's
+behavior — it's purely informational, unlike the geofence failsafe.
+
+Click **Fetch broadcast** under **Remote ID** to see the simulated
+identity/location broadcast payload for the selected vehicle — try it
+before and after a geofence breach and compare the `status.emergency`
+field. From PowerShell:
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/vehicles/sim-1/remote_id
+```
+See [`docs/adr/0013-risk-monitoring-and-remote-id.md`](docs/adr/0013-risk-monitoring-and-remote-id.md)
+for the full design and what this does/doesn't simulate.
 
 ## Quick start (Docker)
 

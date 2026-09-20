@@ -2,14 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>UAS-SYSTEM — GCS (Phase 6a)</title>
+  <title>UAS-SYSTEM — GCS (Phase 6b)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <header>
-    <h1>UAS-SYSTEM <span class="phase-tag">Phase 6a</span></h1>
+    <h1>UAS-SYSTEM <span class="phase-tag">Phase 6b</span></h1>
     <div id="connection-status" class="status status--unknown">connecting…</div>
   </header>
 
@@ -36,6 +36,7 @@
           <dt>Waypoint</dt><dd id="t-waypoint">—</dd>
           <dt>Last update</dt><dd id="t-updated">—</dd>
           <dt>Geofence</dt><dd id="t-emergency">—</dd>
+          <dt>Risk</dt><dd id="t-risk">—</dd>
         </dl>
       </section>
 
@@ -77,6 +78,18 @@
           <button id="btn-fence-delete">Delete</button>
         </div>
         <div id="fence-status">No geofence set.</div>
+      </section>
+
+      <section>
+        <h2>Remote ID</h2>
+        <p class="hint">
+          Simulated broadcast content (see docs/adr/0013-risk-monitoring-and-remote-id.md)
+          -- not an actual radio transmission.
+        </p>
+        <div class="button-row">
+          <button id="btn-remote-id-fetch">Fetch broadcast</button>
+        </div>
+        <pre id="remote-id-output" class="code-output">No broadcast fetched yet.</pre>
       </section>
     </aside>
   </main>

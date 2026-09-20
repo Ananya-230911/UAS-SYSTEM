@@ -11,6 +11,8 @@ from .config import settings
 from .db import get_session, init_db
 from .geofence import point_in_polygon, waypoints_outside_fence
 from .models import Command, EventLogEntry, Geofence, Mission, TelemetrySample, Vehicle
+from .remote_id import build_remote_id_message
+from .risk_monitor import assess_risk
 from .schemas import (
     CommandCreate,
     CommandOut,
@@ -18,11 +20,19 @@ from .schemas import (
     GeofenceOut,
     MissionCreate,
     MissionOut,
+    RemoteIDOut,
     TelemetryIngest,
     TelemetryOut,
     VehicleOut,
 )
 from .ws_manager import ws_manager
+
+# Phase 6b (docs/adr/0013-risk-monitoring-and-remote-id.md): how many of
+# a vehicle's most recent telemetry samples assess_risk() looks at.
+# Small on purpose -- this is a live per-ingest check (like the Phase 6a
+# geofence one), not a batch analytics job, and the heuristics
+# (battery-drain rate, one-step altitude drop) only need a short window.
+RISK_ASSESSMENT_WINDOW = 5
 
 
 @asynccontextmanager
@@ -156,6 +166,23 @@ async def ingest_telemetry(
     row = TelemetrySample(timestamp=now, **sample.model_dump())
     session.add(row)
 
+    # AI-assisted risk monitoring (docs/adr/0013-risk-monitoring-and-remote-id.md):
+    # advisory only -- unlike the failsafe manager below, this never
+    # issues a command, it just updates the flags an operator sees.
+    # Runs on a short recent window (this not-yet-committed sample plus
+    # the last few already stored), the same "check on ingest, no
+    # separate poller" pattern the Phase 6a failsafe already established.
+    history_stmt = (
+        select(TelemetrySample)
+        .where(TelemetrySample.vehicle_id == sample.vehicle_id)
+        .order_by(TelemetrySample.timestamp.desc())
+        .limit(RISK_ASSESSMENT_WINDOW - 1)
+    )
+    history = list(reversed(session.scalars(history_stmt).all()))
+    risk = assess_risk(history + [row])
+    vehicle.risk_level = risk.level
+    vehicle.risk_flags = risk.flags or None
+
     # Failsafe manager: geofence breach -> auto-RTL. Deliberately a
     # simple, deterministic rule (not a learned/AI system -- see the ADR
     # for why that's a separate, later piece of work), and deliberately
@@ -196,6 +223,8 @@ async def ingest_telemetry(
         "type": "telemetry",
         "timestamp": now.isoformat(),
         "emergency_state": vehicle.emergency_state,
+        "risk_level": vehicle.risk_level,
+        "risk_flags": vehicle.risk_flags or [],
         **sample.model_dump(),
     }
     await ws_manager.broadcast(sample.vehicle_id, message)
@@ -509,6 +538,51 @@ def delete_geofence(vehicle_id: str, session: Session = Depends(db_session)):
     session.add(EventLogEntry(vehicle_id=vehicle_id, event_type="GEOFENCE_CLEARED"))
     session.commit()
     return {"status": "cleared"}
+
+
+@app.get(
+    "/vehicles/{vehicle_id}/remote_id",
+    response_model=RemoteIDOut,
+    dependencies=[Depends(require_api_key)],
+)
+def get_remote_id(vehicle_id: str, session: Session = Depends(db_session)):
+    """Phase 6b Remote ID simulator (docs/adr/0013-risk-monitoring-and-remote-id.md).
+    Builds the broadcast payload on demand from current data rather than
+    storing/streaming it -- there's nothing here that isn't already
+    derivable from the vehicle's latest telemetry plus its earliest
+    known position (used as a stand-in "operator location", since this
+    project has no separate ground-control-station position tracked)."""
+    vehicle = session.get(Vehicle, vehicle_id)
+    if vehicle is None:
+        raise HTTPException(status_code=404, detail="vehicle not found")
+
+    latest = session.scalars(
+        select(TelemetrySample)
+        .where(TelemetrySample.vehicle_id == vehicle_id)
+        .order_by(TelemetrySample.timestamp.desc())
+        .limit(1)
+    ).first()
+    earliest = session.scalars(
+        select(TelemetrySample)
+        .where(TelemetrySample.vehicle_id == vehicle_id)
+        .order_by(TelemetrySample.timestamp.asc())
+        .limit(1)
+    ).first()
+
+    return build_remote_id_message(
+        vehicle_id=vehicle_id,
+        timestamp=latest.timestamp if latest else vehicle.last_seen,
+        lat=latest.lat if latest else None,
+        lon=latest.lon if latest else None,
+        alt_m=latest.alt_m if latest else None,
+        relative_alt_m=latest.relative_alt_m if latest else None,
+        groundspeed_ms=latest.groundspeed_ms if latest else None,
+        heading_deg=latest.heading_deg if latest else None,
+        armed=vehicle.armed,
+        emergency_state=vehicle.emergency_state,
+        operator_lat=earliest.lat if earliest else None,
+        operator_lon=earliest.lon if earliest else None,
+    )
 
 
 @app.websocket("/ws/telemetry/{vehicle_id}")

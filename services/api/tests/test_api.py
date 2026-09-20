@@ -612,3 +612,146 @@ def test_geofence_endpoints_require_api_key_when_set(client, monkeypatch):
         ).status_code
         == 200
     )
+
+
+# --- Phase 6b: risk monitoring + Remote ID (docs/adr/0013-risk-monitoring-and-remote-id.md) ---
+
+
+def test_vehicle_defaults_to_low_risk_with_no_flags(client):
+    client.post(
+        "/internal/telemetry",
+        json={
+            "vehicle_id": "risk-test-a",
+            "armed": True,
+            "flight_mode": "MISSION",
+            "battery_pct": 90.0,
+            "gps_fix_type": 3,
+            "satellites_visible": 10,
+            "groundspeed_ms": 5.0,
+        },
+        headers={"X-Internal-Token": "test-secret"},
+    )
+    vehicle = client.get("/vehicles/risk-test-a").json()
+    assert vehicle["risk_level"] == "LOW"
+    assert not vehicle["risk_flags"]
+
+
+def test_low_gps_fix_raises_risk_level_and_flags_it(client):
+    client.post(
+        "/internal/telemetry",
+        json={
+            "vehicle_id": "risk-test-b",
+            "armed": True,
+            "flight_mode": "MISSION",
+            "gps_fix_type": 0,
+            "satellites_visible": 2,
+        },
+        headers={"X-Internal-Token": "test-secret"},
+    )
+    vehicle = client.get("/vehicles/risk-test-b").json()
+    assert "GPS_DEGRADED" in vehicle["risk_flags"]
+    assert vehicle["risk_level"] in ("MEDIUM", "HIGH")
+
+
+def test_risk_monitoring_never_dispatches_a_command(client, monkeypatch):
+    # Regression guard: risk monitoring is advisory-only (unlike the
+    # Phase 6a geofence failsafe) -- it must never call the gateway.
+    monkeypatch.setattr("app.main.httpx.AsyncClient", FakeAsyncClient)
+    FakeAsyncClient.request_log = []
+
+    client.post(
+        "/internal/telemetry",
+        json={
+            "vehicle_id": "risk-test-c",
+            "armed": True,
+            "flight_mode": "MISSION",
+            "gps_fix_type": 0,
+            "groundspeed_ms": 99.0,
+        },
+        headers={"X-Internal-Token": "test-secret"},
+    )
+    vehicle = client.get("/vehicles/risk-test-c").json()
+    assert vehicle["risk_flags"]  # confirms the risky sample was actually flagged
+    assert FakeAsyncClient.request_log == []  # and still no gateway call happened
+
+
+def test_risk_fields_ride_along_on_the_fleet_ws(client):
+    with client.websocket_connect("/ws/fleet") as ws:
+        client.post(
+            "/internal/telemetry",
+            json={
+                "vehicle_id": "risk-test-d",
+                "armed": True,
+                "flight_mode": "MISSION",
+                "gps_fix_type": 0,
+            },
+            headers={"X-Internal-Token": "test-secret"},
+        )
+        message = ws.receive_json()
+    assert message["risk_level"] in ("MEDIUM", "HIGH")
+    assert "GPS_DEGRADED" in message["risk_flags"]
+
+
+def test_remote_id_endpoint_returns_current_broadcast_payload(client):
+    client.post(
+        "/internal/telemetry",
+        json={
+            "vehicle_id": "rid-test-a",
+            "armed": True,
+            "flight_mode": "MISSION",
+            "lat": 37.4275,
+            "lon": -122.1697,
+            "alt_m": 50.0,
+            "relative_alt_m": 20.0,
+            "groundspeed_ms": 5.0,
+            "heading_deg": 90.0,
+        },
+        headers={"X-Internal-Token": "test-secret"},
+    )
+    resp = client.get("/vehicles/rid-test-a/remote_id")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["basic_id"]["uas_id"] == "rid-test-a"
+    assert body["location"]["latitude"] == 37.4275
+    assert body["status"]["armed"] is True
+    assert body["status"]["emergency"] is False
+    # The vehicle's first-known position stands in for operator location.
+    assert body["operator"]["latitude"] == 37.4275
+
+
+def test_remote_id_reflects_emergency_state(client, monkeypatch):
+    monkeypatch.setattr("app.main.httpx.AsyncClient", FakeAsyncClient)
+    client.post("/vehicles/rid-test-b/geofence", json={"points": FENCE_POINTS})
+    client.post(
+        "/internal/telemetry",
+        json={
+            "vehicle_id": "rid-test-b",
+            "armed": True,
+            "flight_mode": "MISSION",
+            "lat": 50.0,
+            "lon": -122.5,
+        },
+        headers={"X-Internal-Token": "test-secret"},
+    )
+    resp = client.get("/vehicles/rid-test-b/remote_id")
+    body = resp.json()
+    assert body["status"]["emergency"] is True
+    assert body["status"]["emergency_state"] == "GEOFENCE_BREACH"
+
+
+def test_remote_id_404s_for_unknown_vehicle(client):
+    resp = client.get("/vehicles/never-existed/remote_id")
+    assert resp.status_code == 404
+
+
+def test_remote_id_requires_api_key_when_set(client, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "api_key", "s3cret")
+    assert client.get("/vehicles/rid-test-a/remote_id").status_code == 401
+    assert (
+        client.get(
+            "/vehicles/rid-test-a/remote_id", headers={"X-API-Key": "s3cret"}
+        ).status_code
+        == 200
+    )

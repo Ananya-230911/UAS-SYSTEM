@@ -38,6 +38,8 @@ class VehicleOut(BaseModel):
     current_waypoint_seq: int | None = None
     active_mission_id: str | None = None
     emergency_state: str = "NORMAL"
+    risk_level: str = "LOW"
+    risk_flags: list[str] | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -100,3 +102,41 @@ class GeofenceOut(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# Phase 6b Remote ID simulator (docs/adr/0013-risk-monitoring-and-remote-id.md).
+# Nested to mirror app/remote_id.py's build_remote_id_message() output --
+# these are plain response-shape models (the endpoint isn't backed by a
+# DB row), not something read via from_attributes.
+class RemoteIDBasicID(BaseModel):
+    id_type: str
+    uas_id: str
+
+
+class RemoteIDLocation(BaseModel):
+    timestamp: str
+    latitude: float | None = None
+    longitude: float | None = None
+    geodetic_altitude_m: float | None = None
+    height_above_takeoff_m: float | None = None
+    speed_ms: float | None = None
+    direction_deg: float | None = None
+
+
+class RemoteIDOperator(BaseModel):
+    latitude: float | None = None
+    longitude: float | None = None
+
+
+class RemoteIDStatus(BaseModel):
+    armed: bool
+    emergency: bool
+    emergency_state: str
+
+
+class RemoteIDOut(BaseModel):
+    message_version: str
+    basic_id: RemoteIDBasicID
+    location: RemoteIDLocation
+    operator: RemoteIDOperator
+    status: RemoteIDStatus

@@ -38,6 +38,19 @@ class Vehicle(Base):
     # could grow into (e.g. a distinct "RTL_COMMANDED" state) if a second
     # failsafe trigger is ever added.
     emergency_state: Mapped[str] = mapped_column(String, default="NORMAL")
+    # Phase 6b (docs/adr/0013-risk-monitoring-and-remote-id.md): a
+    # heuristic (not learned/ML) risk assessment recomputed on every
+    # telemetry ingest -- LOW/MEDIUM/HIGH plus the specific flags that
+    # produced it (e.g. "RAPID_BATTERY_DRAIN"). Purely advisory: unlike
+    # emergency_state above, nothing here ever auto-commands the
+    # vehicle -- see app/risk_monitor.py and the ADR for why that's a
+    # deliberate line this feature doesn't cross. risk_flags stays
+    # nullable rather than defaulting to an empty list so the SQLite
+    # column-backfill safety net (app/db.py) can give it a plain literal
+    # default; every row gets a real (possibly empty) list the moment
+    # its next telemetry sample is ingested.
+    risk_level: Mapped[str] = mapped_column(String, default="LOW")
+    risk_flags: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
 
 class TelemetrySample(Base):

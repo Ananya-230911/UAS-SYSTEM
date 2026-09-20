@@ -209,6 +209,31 @@ async function deleteFence() {
   }
 }
 
+// Phase 6b Remote ID simulator (docs/adr/0013-risk-monitoring-and-remote-id.md).
+// On-demand (a button), not fetched on every telemetry tick -- this is
+// for occasional inspection of the broadcast content, not something
+// that needs to track live telemetry frequency.
+async function fetchRemoteId() {
+  const output = document.getElementById("remote-id-output");
+  if (!selectedVehicleId) {
+    output.textContent = "Select a vehicle first.";
+    return;
+  }
+  try {
+    const resp = await fetch(`${API_BASE}/vehicles/${selectedVehicleId}/remote_id`, {
+      headers: authHeaders(),
+    });
+    const body = await resp.json();
+    if (!resp.ok) {
+      output.textContent = `Fetch FAILED: ${body.detail || "unknown error"}`;
+      return;
+    }
+    output.textContent = JSON.stringify(body, null, 2);
+  } catch (err) {
+    output.textContent = `Fetch FAILED: ${err}`;
+  }
+}
+
 function setStatus(state, text) {
   const el = document.getElementById("connection-status");
   el.className = `status status--${state}`;
@@ -275,6 +300,7 @@ function selectVehicle(vehicleId) {
   clearMission();
   clearFenceDraft();
   loadFence(vehicleId);
+  document.getElementById("remote-id-output").textContent = "No broadcast fetched yet.";
 
   // Re-render every marker's icon so the previously-selected vehicle drops
   // back to a plain fleet dot and the newly-selected one gets the drone icon.
@@ -314,6 +340,17 @@ function renderTelemetry(sample) {
   emergencyEl.textContent =
     sample.emergency_state === "GEOFENCE_BREACH" ? "BREACHED — auto-RTL issued" : "OK";
   emergencyEl.classList.toggle("emergency", sample.emergency_state === "GEOFENCE_BREACH");
+
+  // Phase 6b (docs/adr/0013-risk-monitoring-and-remote-id.md): advisory
+  // only -- shown here for the operator to notice, never something the
+  // UI or backend acts on automatically the way it does for a geofence
+  // breach above.
+  const riskEl = document.getElementById("t-risk");
+  const riskLevel = sample.risk_level || "LOW";
+  const riskFlags = sample.risk_flags || [];
+  riskEl.textContent = riskFlags.length ? `${riskLevel} (${riskFlags.join(", ")})` : riskLevel;
+  riskEl.classList.toggle("risk-medium", riskLevel === "MEDIUM");
+  riskEl.classList.toggle("risk-high", riskLevel === "HIGH");
 
   if (sample.lat != null && sample.lon != null) {
     path.addLatLng([sample.lat, sample.lon]);
@@ -489,6 +526,7 @@ document.getElementById("btn-fence-draw").addEventListener("click", toggleFenceD
 document.getElementById("btn-fence-clear").addEventListener("click", clearFenceDraft);
 document.getElementById("btn-fence-save").addEventListener("click", saveFence);
 document.getElementById("btn-fence-delete").addEventListener("click", deleteFence);
+document.getElementById("btn-remote-id-fetch").addEventListener("click", fetchRemoteId);
 
 setStatus("unknown", "connecting…");
 if (selectedVehicleId) {
