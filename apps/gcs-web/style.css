@@ -490,3 +490,67 @@ main {
   color: white;
 }
 #btn-spawn-pick:hover { background: var(--blue-dark); }
+
+.perception-panel {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-top: 0.4rem;
+}
+
+.perception-heading {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin: 0.55rem 0 0.25rem;
+}
+
+.perception-heading:first-child {
+  margin-top: 0;
+}
+
+.perception-empty {
+  font-size: 0.8rem;
+  color: var(--muted-light);
+}
+
+.perception-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.82rem;
+}
+
+.perception-list li {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.2rem 0;
+  border-bottom: 1px solid #f1f5f9;
+  color: var(--ink);
+}
+
+.perception-conf {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.perception-action {
+  display: inline-block;
+  padding: 0.25rem 0.7rem;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 0.78rem;
+  margin-bottom: 0.35rem;
+}
+
+.perception-action.action-continue { background: var(--green-light); color: #15803d; }
+.perception-action.action-hold,
+.perception-action.action-divert { background: #fff7ed; color: #c2410c; }
+.perception-action.action-rtl { background: var(--red-light); color: var(--red); }
+
+.perception-reasoning {
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.4;
+}

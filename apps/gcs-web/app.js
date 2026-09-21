@@ -11,6 +11,12 @@
 const params = new URLSearchParams(window.location.search);
 const API_BASE = params.get("api") || "http://localhost:8000";
 const WS_BASE = API_BASE.replace(/^http/, "ws");
+// Perception & AI decision service (docs/adr/0015-perception-and-decision.md)
+// -- a separate process/origin from API_BASE, same reasoning as why it's
+// a separate services/perception in the repo: its ultralytics/torch
+// dependency shouldn't be forced onto the core GCS stack. Has no auth of
+// its own (see the ADR's known limitations), so no api_key is sent here.
+const PERCEPTION_BASE = params.get("perception") || "http://localhost:8010";
 // Phase 5 (docs/adr/0011-api-authentication.md): opt-in shared API key.
 // Empty when the API isn't configured with one (Phase 1-4 default), in
 // which case every header/query-param below is simply absent/blank and
@@ -245,6 +251,98 @@ async function fetchRemoteId() {
   }
 }
 
+// --- Perception & AI decision service
+// (docs/adr/0015-perception-and-decision.md). A separate origin
+// (PERCEPTION_BASE), so a fetch failure here most likely means that
+// service just isn't running -- surfaced as a specific hint, not a bare
+// error, since it's easy to forget to start a 5th process. ---
+
+function perceptionNotRunningHint(err) {
+  return `FAILED: ${err} -- is the perception service running on ${PERCEPTION_BASE}? ` +
+    `(cd services/perception && ..\\..\\.venv\\Scripts\\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8010)`;
+}
+
+function renderPerception(body, withDecision) {
+  const output = document.getElementById("perception-output");
+  const parts = [];
+
+  const detections = body.detections || [];
+  parts.push('<div class="perception-heading">Detected objects</div>');
+  parts.push(
+    detections.length === 0
+      ? '<div class="perception-empty">None detected.</div>'
+      : '<ul class="perception-list">' +
+          detections
+            .map((d) => `<li>${d.class_name} <span class="perception-conf">${Math.round(d.confidence * 100)}%</span></li>`)
+            .join("") +
+          "</ul>"
+  );
+
+  const obstacles = body.lidar_obstacles || [];
+  parts.push('<div class="perception-heading">LiDAR obstacles</div>');
+  parts.push(
+    obstacles.length === 0
+      ? '<div class="perception-empty">Clear.</div>'
+      : '<ul class="perception-list">' +
+          obstacles.map((o) => `<li>${o.range_m.toFixed(1)} m @ ${o.bearing_deg.toFixed(0)}°</li>`).join("") +
+          "</ul>"
+  );
+
+  if (withDecision && body.recommendation) {
+    const rec = body.recommendation;
+    parts.push('<div class="perception-heading">AI recommendation</div>');
+    parts.push(`<div class="perception-action action-${rec.action.toLowerCase()}">${rec.action}</div>`);
+    parts.push(`<div class="perception-reasoning">${rec.reasoning}</div>`);
+  }
+
+  output.innerHTML = parts.join("");
+}
+
+async function fetchPerception() {
+  const output = document.getElementById("perception-output");
+  if (!selectedVehicleId) {
+    output.textContent = "Select a vehicle first.";
+    return;
+  }
+  output.textContent = "Running detection…";
+  try {
+    const resp = await fetch(`${PERCEPTION_BASE}/vehicles/${selectedVehicleId}/perception`);
+    const body = await resp.json();
+    if (!resp.ok) {
+      output.textContent = `FAILED: ${body.detail || "unknown error"}`;
+      return;
+    }
+    renderPerception(body, false);
+  } catch (err) {
+    output.textContent = perceptionNotRunningHint(err);
+  }
+}
+
+async function fetchDecision() {
+  const output = document.getElementById("perception-output");
+  if (!selectedVehicleId) {
+    output.textContent = "Select a vehicle first.";
+    return;
+  }
+  const known = vehicles[selectedVehicleId] || {};
+  const qs = new URLSearchParams({ armed: known.armed ? "true" : "false" });
+  if (known.battery_pct != null) qs.set("battery_pct", known.battery_pct);
+  if (known.gps_fix_type != null) qs.set("gps_fix_type", known.gps_fix_type);
+
+  output.textContent = "Thinking…";
+  try {
+    const resp = await fetch(`${PERCEPTION_BASE}/vehicles/${selectedVehicleId}/decision?${qs}`);
+    const body = await resp.json();
+    if (!resp.ok) {
+      output.textContent = `FAILED: ${body.detail || "unknown error"}`;
+      return;
+    }
+    renderPerception(body, true);
+  } catch (err) {
+    output.textContent = perceptionNotRunningHint(err);
+  }
+}
+
 // --- Map location search (Nominatim/OpenStreetMap geocoding, no API key
 // needed -- consistent with this page already using OSM's free tile
 // server). Purely a viewport change: it moves what part of the world
@@ -406,6 +504,7 @@ function selectVehicle(vehicleId) {
   clearFenceDraft();
   loadFence(vehicleId);
   document.getElementById("remote-id-output").textContent = "No broadcast fetched yet.";
+  document.getElementById("perception-output").textContent = "Nothing fetched yet.";
 
   // Re-render every marker's icon so the previously-selected vehicle drops
   // back to a plain fleet dot and the newly-selected one gets the drone icon.
@@ -632,6 +731,8 @@ document.getElementById("btn-fence-clear").addEventListener("click", clearFenceD
 document.getElementById("btn-fence-save").addEventListener("click", saveFence);
 document.getElementById("btn-fence-delete").addEventListener("click", deleteFence);
 document.getElementById("btn-remote-id-fetch").addEventListener("click", fetchRemoteId);
+document.getElementById("btn-perception-fetch").addEventListener("click", fetchPerception);
+document.getElementById("btn-decision-fetch").addEventListener("click", fetchDecision);
 
 document.getElementById("btn-map-search").addEventListener("click", searchMapLocation);
 document.getElementById("map-search-input").addEventListener("keydown", (e) => {

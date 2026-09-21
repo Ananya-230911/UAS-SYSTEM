@@ -7,9 +7,16 @@ __pycache__/
 # Local dev DB
 services/api/*.db
 services/api/*.db-journal
+services/api/*.db-wal
+services/api/*.db-shm
 
 # Local run artifacts
 .run-logs/
+
+# Perception service: YOLO model weights auto-download on first run
+# (see services/perception/app/detection.py) -- a build artifact, not
+# source to commit.
+services/perception/.models/
 
 # Node (if the gcs-web migration to a build step ever happens)
 node_modules/

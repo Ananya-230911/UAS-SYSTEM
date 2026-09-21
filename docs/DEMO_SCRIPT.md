@@ -99,6 +99,25 @@ simulator."
    drones are legally required to broadcast their identity and
    location — this simulates that broadcast's content."
 
+## 6b. Optional: AI perception & decision (2 min) — only if the perception service is running
+
+**Only do this section if you started `scripts/run_perception.ps1`
+beforehand and confirmed it's up** — it's a separate, optional service
+(heavier dependency, kept out of the core startup on purpose). Skip
+this section entirely rather than risk it during the demo if you
+didn't rehearse it.
+
+1. Under **Perception & AI Decision**, click **Detect objects**.
+   **Say:** "This runs a real YOLOv8 object-detection model — not a
+   mock — on a simulated camera frame." Point at the detected objects
+   and confidence percentages.
+2. Click **Get recommendation**. **Say:** "This adds a retrieval-based
+   decision layer — it matches the situation against a small set of
+   safety guidelines, then runs it through independent guardrail rules
+   before recommending an action. It's advisory only, same as the risk
+   monitor — it never commands the vehicle itself."
+3. Point at the recommended action badge and the reasoning text.
+
 ## 7. Wrap-up (1 min)
 
 **Say:** "Everything here is backed by automated tests — over 100 of

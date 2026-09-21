@@ -120,6 +120,22 @@
         </div>
         <pre id="remote-id-output" class="code-output">No broadcast fetched yet.</pre>
       </section>
+
+      <section>
+        <h2>Perception &amp; AI Decision</h2>
+        <p class="hint">
+          Real YOLOv8 object detection on a simulated camera frame, plus
+          a simulated LiDAR obstacle scan and a retrieval + guardrails
+          safety recommendation (see
+          docs/adr/0015-perception-and-decision.md). Advisory only --
+          never sent to the vehicle automatically.
+        </p>
+        <div class="button-row">
+          <button id="btn-perception-fetch">Detect objects</button>
+          <button id="btn-decision-fetch">Get recommendation</button>
+        </div>
+        <div id="perception-output" class="perception-panel">Nothing fetched yet.</div>
+      </section>
     </aside>
   </main>
 

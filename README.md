@@ -3,7 +3,7 @@
 Unmanned Aerial System — ground control, telemetry, and mission management
 software stack.
 
-## Status: Phases 1-6b complete (the full original roadmap) + a map search / vehicle spawn helper
+## Status: Phases 1-6b complete (the full original roadmap) + map search / vehicle spawn helper + an optional AI perception & decision service
 
 See [`docs/PHASE_1_PLAN.md`](docs/PHASE_1_PLAN.md) for the Phase 1 plan and
 [`docs/adr/`](docs/adr/) for the architecture decisions behind every
@@ -11,8 +11,9 @@ phase (Phase 2's mission protocol decision is ADR-0008, Phase 3's fleet
 decisions are ADR-0009, Phase 4's real-PX4 validation is ADR-0010, Phase
 5's API key auth is ADR-0011, Phase 6a's geofencing/failsafe is ADR-0012,
 Phase 6b's risk monitoring/Remote ID is ADR-0013). There is no Phase 7 —
-the roadmap is done; ADR-0014 (map search + vehicle spawn helper) is a
-UX/tooling addition made after it, not a new phase.
+the roadmap is done; ADR-0014 (map search + vehicle spawn helper) and
+ADR-0015 (perception & AI decision service) are additions made after it,
+not new phases.
 
 Phase 1 delivers a working vertical slice end-to-end against a simulated
 vehicle: telemetry flows from a simulator through a MAVLink gateway into a
@@ -46,10 +47,19 @@ flags an operator can see but that never auto-command the vehicle, and a
 Remote ID simulator exposes the fields a real drone's identity/location
 broadcast would carry (see
 [`docs/adr/0013-risk-monitoring-and-remote-id.md`](docs/adr/0013-risk-monitoring-and-remote-id.md)).
+An optional `services/perception` service adds simulated camera/LiDAR
+sensor input feeding **real** YOLOv8 object detection, plus a
+retrieval + guardrails AI decision layer that recommends (never
+auto-commands) an action — clearly documented, module by module, as to
+what's genuinely real vs. simulated (see
+[`docs/adr/0015-perception-and-decision.md`](docs/adr/0015-perception-and-decision.md)).
 
 ```
 simulation/sitl  --MAVLink/UDP-->  telemetry-gateway  --HTTP-->  api  <--WS/REST-->  gcs-web
-   (simulator)                        (services/)              (services/)          (apps/)
+   (simulator)                        (services/)              (services/)              |
+                                                                                          |
+                                            services/perception (optional) <--REST--------+
+                                    (camera/LiDAR sim -> real YOLOv8 -> RAG + guardrails)
 ```
 
 ## Quick start (no Docker required)
@@ -228,6 +238,23 @@ optional coordinates:
 powershell -ExecutionPolicy Bypass -File scripts\run_local.ps1 -HomeLat 19.0760 -HomeLon 72.8777
 ```
 
+### Try the perception & AI decision service (optional)
+
+Off by default and separate from the core stack — see
+[`docs/adr/0015-perception-and-decision.md`](docs/adr/0015-perception-and-decision.md)
+for exactly what's real (YOLOv8 object detection, TF-IDF retrieval,
+guardrail rules) vs. simulated (the camera/LiDAR input) here. One-time
+setup, then start it alongside your usual `run_local.ps1` session:
+```powershell
+.venv\Scripts\pip.exe install -r services\perception\requirements.txt
+powershell -ExecutionPolicy Bypass -File scripts\run_perception.ps1
+```
+Then, in the GCS UI, under **Perception & AI Decision**: click
+**Detect objects** to see real YOLOv8 detections on a simulated camera
+frame, or **Get recommendation** to also get an advisory action from
+the retrieval + guardrails decision layer (it never sends anything to
+the vehicle itself).
+
 ## Quick start (Docker)
 
 ```bash
@@ -255,6 +282,7 @@ This is the same check CI runs on every push.
 | `simulation/sitl/` | Phase 1/2 MAVLink simulator (stand-in for PX4/ArduPilot SITL — see ADR-0001) |
 | `services/telemetry-gateway/` | MAVLink ↔ internal HTTP bridge (one instance per vehicle, Phase 3) |
 | `services/api/` | REST + WebSocket backend, persistence, fleet-wide `/ws/fleet` |
+| `services/perception/` | Optional: simulated camera/LiDAR + real YOLOv8 detection + RAG/guardrails decision (ADR-0015) |
 | `apps/gcs-web/` | Ground control station UI: fleet map/list + per-vehicle detail |
 | `infra/` | Docker Compose for the full stack |
 | `scripts/` | Local run + end-to-end smoke test |
