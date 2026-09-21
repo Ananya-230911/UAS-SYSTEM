@@ -42,6 +42,7 @@ header {
   box-shadow: var(--shadow-md);
   position: relative;
   z-index: 500;
+  border-bottom: 2px solid var(--blue);
 }
 
 header h1 {
@@ -150,21 +151,35 @@ main {
 }
 
 #panel {
-  width: 340px;
+  width: 380px;
   flex-shrink: 0;
   background: var(--page);
   border-left: 1px solid var(--border);
-  padding: 0.9rem;
+  padding: 1rem;
   overflow-y: auto;
 }
 
 #panel section {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 0.85rem 0.9rem 0.95rem;
-  margin-bottom: 0.7rem;
+  border-radius: 12px;
+  padding: 0.9rem 1rem 1rem;
+  margin-bottom: 0.75rem;
   box-shadow: var(--shadow-sm);
+  border-left: 3px solid transparent;
+  transition: box-shadow 0.15s ease;
+}
+
+#panel section:hover {
+  box-shadow: var(--shadow-md);
+}
+
+#panel section.section-flight {
+  border-left-color: var(--blue);
+}
+
+#panel section.section-tool {
+  border-left-color: var(--muted-light);
 }
 
 .panel-group-label {
@@ -262,11 +277,11 @@ main {
    carry real consequences, so they look distinct from neutral
    draw/save/clear utility buttons elsewhere in the panel. */
 #btn-arm {
-  background: var(--green-light);
-  border-color: #bbf7d0;
-  color: #15803d;
+  background: var(--green);
+  border-color: var(--green);
+  color: white;
 }
-#btn-arm:hover { background: #dcfce7; }
+#btn-arm:hover { background: #15803d; border-color: #15803d; }
 
 #btn-disarm {
   background: #f8fafc;
@@ -275,16 +290,17 @@ main {
 }
 
 #btn-takeoff {
-  background: var(--blue-light);
-  border-color: #bfdbfe;
-  color: var(--blue-dark);
+  background: var(--blue);
+  border-color: var(--blue);
+  color: white;
 }
-#btn-takeoff:hover { background: #dbeafe; }
+#btn-takeoff:hover { background: var(--blue-dark); border-color: var(--blue-dark); }
 
 #btn-rtl {
   background: #fff7ed;
   border-color: #fed7aa;
   color: #c2410c;
+  font-weight: 700;
 }
 #btn-rtl:hover { background: #ffedd5; }
 
@@ -365,10 +381,10 @@ main {
 
 .fleet-row {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: 0.5rem 0.6rem;
-  margin-bottom: 0.3rem;
+  gap: 0.5rem;
+  padding: 0.55rem 0.7rem;
+  margin-bottom: 0.35rem;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   cursor: pointer;
@@ -387,11 +403,25 @@ main {
   background: var(--blue-light);
 }
 
+.fleet-row-dot {
+  width: 9px;
+  height: 9px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--muted-light);
+}
+
+.fleet-row-dot.armed {
+  background: var(--green);
+  box-shadow: 0 0 0 3px var(--green-light);
+}
+
 .fleet-row .fleet-row-id {
   font-weight: 700;
 }
 
 .fleet-row .fleet-row-meta {
+  margin-left: auto;
   color: var(--muted);
   font-size: 0.72rem;
 }
@@ -508,6 +538,15 @@ main {
   color: white;
 }
 #btn-spawn-pick:hover { background: var(--blue-dark); }
+
+#btn-mission-start,
+#btn-fence-save {
+  background: var(--blue);
+  border-color: var(--blue);
+  color: white;
+}
+#btn-mission-start:hover,
+#btn-fence-save:hover { background: var(--blue-dark); border-color: var(--blue-dark); }
 
 .perception-panel {
   font-size: 0.8rem;

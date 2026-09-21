@@ -487,6 +487,7 @@ function renderFleetList() {
     const row = document.createElement("div");
     row.className = `fleet-row${id === selectedVehicleId ? " selected" : ""}`;
     row.innerHTML =
+      `<span class="fleet-row-dot${sample.armed ? " armed" : ""}"></span>` +
       `<span class="fleet-row-id">${id}</span>` +
       `<span class="fleet-row-meta">${sample.armed ? "ARMED" : "disarmed"} · ` +
       `${sample.flight_mode || "—"} · ${fmt(sample.battery_pct, 0, "%")}</span>`;
