@@ -167,13 +167,31 @@ main {
   box-shadow: var(--shadow-sm);
 }
 
-#panel h2 {
-  font-size: 0.72rem;
+.panel-group-label {
+  font-size: 0.68rem;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.07em;
-  color: var(--muted);
-  margin: 0 0 0.6rem;
+  letter-spacing: 0.1em;
+  color: var(--muted-light);
+  margin: 1.1rem 0 0.5rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--border);
+}
+
+#panel > .panel-group-label:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+#panel h2 {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+  margin: 0 0 0.65rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -296,10 +314,10 @@ main {
 }
 
 .hint {
-  font-size: 0.76rem;
+  font-size: 0.8rem;
   color: var(--muted);
   margin: 0 0 0.6rem;
-  line-height: 1.4;
+  line-height: 1.45;
 }
 
 #waypoint-list {

@@ -27,25 +27,8 @@
     </div>
 
     <aside id="panel">
-      <section>
-        <h2>Add a Vehicle</h2>
-        <p class="hint">
-          Click "Pick location", then click the map where the new
-          simulated vehicle should start. This doesn't launch anything by
-          itself -- it gives you the exact commands to run in a new
-          terminal, using the location you picked as that vehicle's home.
-        </p>
-        <div class="button-row">
-          <button id="btn-spawn-pick">Pick location</button>
-        </div>
-        <div id="spawn-panel" hidden>
-          <label>Vehicle ID <input type="text" id="spawn-vehicle-id" /></label>
-          <label>API port <input type="number" id="spawn-api-port" /></label>
-          <label>Gateway port <input type="number" id="spawn-gateway-port" /></label>
-          <label>MAVLink port <input type="number" id="spawn-mavlink-port" /></label>
-          <pre id="spawn-commands" class="code-output"></pre>
-        </div>
-      </section>
+      <h3 class="panel-group-label">Flight control</h3>
+
       <section>
         <h2>Fleet</h2>
         <div id="fleet-list"><p class="hint">Waiting for vehicles…</p></div>
@@ -107,6 +90,28 @@
           <button id="btn-fence-delete">Delete</button>
         </div>
         <div id="fence-status">No geofence set.</div>
+      </section>
+
+      <h3 class="panel-group-label">Tools</h3>
+
+      <section>
+        <h2>Add a Vehicle</h2>
+        <p class="hint">
+          Click "Pick location", then click the map where the new
+          simulated vehicle should start. This doesn't launch anything by
+          itself -- it gives you the exact commands to run in a new
+          terminal, using the location you picked as that vehicle's home.
+        </p>
+        <div class="button-row">
+          <button id="btn-spawn-pick">Pick location</button>
+        </div>
+        <div id="spawn-panel" hidden>
+          <label>Vehicle ID <input type="text" id="spawn-vehicle-id" /></label>
+          <label>API port <input type="number" id="spawn-api-port" /></label>
+          <label>Gateway port <input type="number" id="spawn-gateway-port" /></label>
+          <label>MAVLink port <input type="number" id="spawn-mavlink-port" /></label>
+          <pre id="spawn-commands" class="code-output"></pre>
+        </div>
       </section>
 
       <section>
