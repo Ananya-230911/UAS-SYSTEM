@@ -81,6 +81,16 @@ Then open `http://localhost:8080/?api=http://localhost:8000`. Single
 vehicle only — for a second vehicle, add the two extra terminals from
 the "Want a second vehicle" section below by hand alongside it.
 
+**Restarting (e.g. before a demo)?** Run `stop_local.ps1` first so
+leftover processes from an earlier run don't cause "port already in
+use" errors — it only stops this project's own processes (found by
+which ports they're listening on), not every Python process on your
+machine:
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\stop_local.ps1
+powershell -ExecutionPolicy Bypass -File scripts\run_local.ps1
+```
+
 If you'd rather run (or debug) each piece yourself, here are the same
 four components as separate terminals — **start them in this order**
 (API → gateway → simulator), each `cd`'d into the service's own
