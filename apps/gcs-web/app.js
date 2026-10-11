@@ -448,6 +448,26 @@ function fmt(value, digits = 1, suffix = "") {
   return `${Number(value).toFixed(digits)}${suffix}`;
 }
 
+// --- Fleet staleness (multi-agent plan Phase 1). freshnessOf() itself
+// lives in freshness.js (loaded before this file, see index.html) so
+// it's unit-testable without a browser -- this is just the DOM-facing
+// half: deciding what to show once freshnessOf() has classified a
+// sample. ---
+
+function updateFreshnessIndicator() {
+  if (!selectedVehicleId) return;
+  const sample = vehicles[selectedVehicleId];
+  if (!sample) return;
+  const freshness = freshnessOf(sample);
+  const lastSeen = sample.timestamp || sample.last_seen;
+  const el = document.getElementById("t-updated");
+  const base = lastSeen ? new Date(lastSeen).toLocaleTimeString() : "—";
+  el.textContent =
+    freshness === "stale" ? `${base} (stale)` : freshness === "disconnected" ? `${base} (disconnected)` : base;
+  el.classList.toggle("stale", freshness === "stale");
+  el.classList.toggle("disconnected", freshness === "disconnected");
+}
+
 // --- Fleet: every known vehicle gets a marker; the selected one is drawn
 // as the highlighted drone icon, everyone else as a small dot (green if
 // armed, gray otherwise). ---
@@ -484,13 +504,17 @@ function renderFleetList() {
   container.innerHTML = "";
   ids.forEach((id) => {
     const sample = vehicles[id];
+    const freshness = freshnessOf(sample);
     const row = document.createElement("div");
-    row.className = `fleet-row${id === selectedVehicleId ? " selected" : ""}`;
+    row.className =
+      `fleet-row${id === selectedVehicleId ? " selected" : ""} freshness-${freshness}`;
+    const freshnessSuffix =
+      freshness === "stale" ? " · STALE" : freshness === "disconnected" ? " · DISCONNECTED" : "";
     row.innerHTML =
       `<span class="fleet-row-dot${sample.armed ? " armed" : ""}"></span>` +
       `<span class="fleet-row-id">${id}</span>` +
       `<span class="fleet-row-meta">${sample.armed ? "ARMED" : "disarmed"} · ` +
-      `${sample.flight_mode || "—"} · ${fmt(sample.battery_pct, 0, "%")}</span>`;
+      `${sample.flight_mode || "—"} · ${fmt(sample.battery_pct, 0, "%")}${freshnessSuffix}</span>`;
     row.addEventListener("click", () => selectVehicle(id));
     container.appendChild(row);
   });
@@ -540,7 +564,7 @@ function renderTelemetry(sample) {
       : "—";
   document.getElementById("t-waypoint").textContent =
     sample.current_waypoint_seq != null ? `#${sample.current_waypoint_seq + 1}` : "—";
-  document.getElementById("t-updated").textContent = new Date(sample.timestamp).toLocaleTimeString();
+  updateFreshnessIndicator();
   const emergencyEl = document.getElementById("t-emergency");
   emergencyEl.textContent =
     sample.emergency_state === "GEOFENCE_BREACH" ? "BREACHED — auto-RTL issued" : "OK";
@@ -753,3 +777,11 @@ if (selectedVehicleId) {
 }
 discoverVehicles();
 connectFleetWebSocket();
+
+// Freshness (stale/disconnected) has to re-evaluate on a clock tick,
+// not just when a new telemetry message arrives -- the whole point is
+// noticing when messages *stop* arriving.
+setInterval(() => {
+  renderFleetList();
+  updateFreshnessIndicator();
+}, 1000);

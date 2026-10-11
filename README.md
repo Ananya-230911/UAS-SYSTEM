@@ -152,6 +152,18 @@ sim-2's commands to its own gateway (see
 Both vehicles will show up in the same browser tab's Fleet list — no
 `vehicle=` query param needed.
 
+**Want more than 2, without doing the above by hand?**
+`scripts/run_fleet.ps1 -Count N` automates exactly the steps above —
+it starts the API (already knowing every vehicle's gateway via
+`GATEWAY_URLS_JSON`, computed for you), then N gateway+simulator pairs
+on the same port scheme, then the UI, each in its own window:
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run_fleet.ps1 -Count 3
+```
+Every vehicle in the Fleet list also now shows **STALE** (no telemetry
+for 3s) or **DISCONNECTED** (15s) instead of silently going quiet —
+useful once you're watching more than one or two vehicles at a time.
+
 ### Want API authentication (Phase 5)?
 
 Off by default — everything above works unchanged with no key. To turn

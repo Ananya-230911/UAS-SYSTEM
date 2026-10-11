@@ -40,7 +40,10 @@ jobs:
         run: PYTHONPATH=. pytest tests/ -v
 
       - name: Check gcs-web JS syntax
-        run: node --check apps/gcs-web/app.js
+        run: node --check apps/gcs-web/app.js && node --check apps/gcs-web/freshness.js
+
+      - name: Test gcs-web freshness logic
+        run: node --test apps/gcs-web/tests/*.test.js
 
   integration-smoke-test:
     runs-on: ubuntu-latest

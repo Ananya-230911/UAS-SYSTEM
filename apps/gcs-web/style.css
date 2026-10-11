@@ -426,6 +426,30 @@ main {
   font-size: 0.72rem;
 }
 
+.fleet-row.freshness-stale .fleet-row-meta {
+  color: var(--amber);
+  font-weight: 700;
+}
+
+.fleet-row.freshness-disconnected {
+  opacity: 0.6;
+}
+
+.fleet-row.freshness-disconnected .fleet-row-meta {
+  color: var(--red);
+  font-weight: 700;
+}
+
+#t-updated.stale {
+  color: var(--amber);
+  font-weight: 700;
+}
+
+#t-updated.disconnected {
+  color: var(--red);
+  font-weight: 700;
+}
+
 .fleet-marker {
   width: 14px;
   height: 14px;
