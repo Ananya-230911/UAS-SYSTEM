@@ -87,22 +87,39 @@ class TaskStatus(str, Enum):
     REASSIGNED = "REASSIGNED"
 
 
+class VehicleRole(str, Enum):
+    """docs/IMPLEMENTATION_PLAN.md Phase 3 roles. COORDINATOR runs the
+    task auction (and still searches); SCOUT searches its cells. RELAY
+    and SURVEILLANCE are defined so later phases share one vocabulary,
+    but nothing assigns them yet -- relaying only means something once
+    there's a mesh (Phase 4), and surveillance needs an operator-picked
+    point (Phase 6)."""
+
+    COORDINATOR = "COORDINATOR"
+    SCOUT = "SCOUT"
+    RELAY = "RELAY"
+    SURVEILLANCE = "SURVEILLANCE"
+
+
 class Task(BaseModel):
-    """One unit of work -- a coverage cell's route, in Phase 3's
-    lawnmower-search terms (planning/coverage.py, not built yet)."""
+    """One unit of work -- a coverage cell's lawnmower route
+    (planning/coverage.py)."""
 
     task_id: str
     cell_id: str
     waypoints: list[Waypoint] = Field(min_length=1)
+    # The cell's outline, so a GCS can colour each drone's cells on the
+    # map (Phase 4). Display data only -- the safety validator checks
+    # the waypoints, never this.
+    cell_polygon: list[GeofencePoint] | None = None
     status: TaskStatus = TaskStatus.PENDING
 
 
 class TaskAssignment(BaseModel):
-    """Which vehicle a task was auctioned to (planning/allocation.py,
-    not built yet), and at what bid cost -- kept here, not folded into
-    Task, so re-auctioning (Phase 4: battery/link loss) only replaces
-    the assignment, never has to touch or duplicate the task/route
-    itself."""
+    """Which vehicle a task was auctioned to (planning/allocation.py),
+    and at what bid cost -- kept here, not folded into Task, so
+    re-auctioning (Phase 4: battery/link loss) only replaces the
+    assignment, never has to touch or duplicate the task/route itself."""
 
     task_id: str
     vehicle_id: str
@@ -128,6 +145,7 @@ class MissionPlan(BaseModel):
     mission_request: MissionRequest
     tasks: list[Task]
     assignments: list[TaskAssignment]
+    roles: dict[str, VehicleRole] = Field(default_factory=dict)
 
     def content_hash(self) -> str:
         """A deterministic hash of everything about this plan's

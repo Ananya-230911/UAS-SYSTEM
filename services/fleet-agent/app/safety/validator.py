@@ -119,48 +119,52 @@ def check_endurance(
     return []
 
 
-def assign_altitude_bands(vehicle_ids: list[str], constraints: SafetyConstraints) -> dict[str, float]:
-    """Each vehicle gets its own altitude: min_altitude_m plus
-    altitude_band_spacing_m per vehicle (ordered deterministically by
-    id), capped at max_altitude_m. Simple and explainable on purpose --
-    not an optimizer; good enough to vertically deconflict a small
-    fleet."""
+def assign_altitude_bands(
+    vehicle_ids: list[str],
+    constraints: SafetyConstraints,
+    base_altitude_m: float | None = None,
+) -> dict[str, float]:
+    """Each vehicle gets its own altitude: base_altitude_m (default
+    min_altitude_m) plus altitude_band_spacing_m per vehicle, ordered
+    deterministically by id, capped at max_altitude_m. Simple and
+    explainable on purpose -- not an optimizer. Used by the planner to
+    choose the altitudes it actually puts in each route; the validator
+    then checks those real altitudes (check_separation), it never
+    trusts this function's output on its own."""
+    base = constraints.min_altitude_m if base_altitude_m is None else base_altitude_m
     bands = {}
     for i, vid in enumerate(sorted(vehicle_ids)):
-        alt = constraints.min_altitude_m + i * constraints.altitude_band_spacing_m
-        bands[vid] = min(alt, constraints.max_altitude_m)
+        bands[vid] = min(base + i * constraints.altitude_band_spacing_m, constraints.max_altitude_m)
     return bands
 
 
 def check_separation(
     routes: dict[str, list[Waypoint]],
-    altitude_bands: dict[str, float],
     constraints: SafetyConstraints,
 ) -> list[ValidationIssue]:
-    """Pairwise check between every two vehicles' routes. If their
-    assigned altitude bands are already far enough apart
-    (altitude_band_spacing_m), they're vertically deconflicted
-    regardless of horizontal distance. Otherwise every corresponding
-    waypoint pair (same list index) must be at least
-    min_horizontal_separation_m apart.
+    """Pairwise check between every two vehicles' routes, at every
+    corresponding waypoint pair (same list index): the two waypoints
+    must be at least altitude_band_spacing_m apart vertically OR at
+    least min_horizontal_separation_m apart horizontally.
 
-    Known simplification: using "same index" as a stand-in for "same
-    time" assumes both routes progress in lockstep -- a real check
-    would need per-waypoint ETAs, which Phase 3's coverage/allocation
-    (not built yet) doesn't compute. Documented here rather than
-    silently assumed.
+    Uses the altitudes actually written in the routes -- an earlier
+    version compared separately-assigned "bands", which a plan could
+    pass while its real waypoints sat at the same height.
+
+    Known simplification: "same index" stands in for "same time",
+    which assumes routes progress in lockstep. A real check needs
+    per-waypoint ETAs. Documented here rather than silently assumed.
     """
     issues: list[ValidationIssue] = []
     vehicle_ids = sorted(routes.keys())
     for i in range(len(vehicle_ids)):
         for j in range(i + 1, len(vehicle_ids)):
             v1, v2 = vehicle_ids[i], vehicle_ids[j]
-            alt_gap = abs(altitude_bands.get(v1, 0.0) - altitude_bands.get(v2, 0.0))
-            if alt_gap >= constraints.altitude_band_spacing_m:
-                continue  # vertically deconflicted already
-
             r1, r2 = routes[v1], routes[v2]
             for idx in range(min(len(r1), len(r2))):
+                alt_gap = abs(r1[idx].alt_m - r2[idx].alt_m)
+                if alt_gap >= constraints.altitude_band_spacing_m:
+                    continue  # vertically deconflicted at this point
                 dist_m = horizontal_distance_m(
                     {"lat": r1[idx].lat, "lon": r1[idx].lon},
                     {"lat": r2[idx].lat, "lon": r2[idx].lon},
@@ -171,7 +175,7 @@ def check_separation(
                             code="SEPARATION_CONFLICT",
                             message=(
                                 f"{v1} and {v2} are only {dist_m:.1f}m apart at waypoint index {idx} "
-                                f"with altitude bands {alt_gap:.1f}m apart (need "
+                                f"and {alt_gap:.1f}m apart vertically (need "
                                 f">={constraints.min_horizontal_separation_m}m horizontal or "
                                 f">={constraints.altitude_band_spacing_m}m vertical separation)"
                             ),
@@ -207,11 +211,13 @@ def validate_mission_plan(
             continue
         routes.setdefault(assignment.vehicle_id, []).extend(task.waypoints)
 
-    vehicle_ids = sorted(routes.keys())
-    altitude_bands = assign_altitude_bands(vehicle_ids, constraints)
+    # Every vehicle the plan names is checked -- not only those that ended
+    # up with a route. A plan must not name (e.g. as coordinator) a drone
+    # that is outside the operating area just because it has no waypoints.
+    vehicle_ids = sorted(set(routes) | set(plan.roles) | set(plan.mission_request.vehicle_ids))
 
     for vid in vehicle_ids:
-        route = routes[vid]
+        route = routes.get(vid, [])
         issues += check_altitude(route, constraints, vid)
         issues += check_route_against_fence(route, geofence, vid)
 
@@ -224,12 +230,25 @@ def validate_mission_plan(
                     vehicle_id=vid,
                 )
             )
+            continue
+        issues += check_launch_point(home, geofence, vid)
+        if not route:
+            continue
+        battery = vehicle_battery_pct.get(vid)
+        if battery is None:
+            # Never assume a value we weren't given -- an unknown battery
+            # can't pass an endurance check.
+            issues.append(
+                ValidationIssue(
+                    code="MISSING_BATTERY",
+                    message=f"battery level unknown for {vid}; can't check endurance",
+                    vehicle_id=vid,
+                )
+            )
         else:
-            issues += check_launch_point(home, geofence, vid)
-            battery = vehicle_battery_pct.get(vid, 100.0)
             issues += check_endurance(route, home, constraints, battery, vid)
 
-    issues += check_separation(routes, altitude_bands, constraints)
+    issues += check_separation(routes, constraints)
 
     return ValidationResult(valid=len(issues) == 0, issues=issues)
 

@@ -74,6 +74,13 @@ recomputes it and requires both the `plan_id` *and* the hash to match.
 This is the mechanism Phase 5 (not built yet) will call immediately
 before dispatching anything to a vehicle.
 
+**Update (Phase 3, ADR-0017):** three flaws in this phase's validator
+were found and fixed while building the planner — separation now
+compares the altitudes actually in the routes (not assigned bands), every
+drone the plan names is checked (not only drones with routes), and an
+unknown battery is flagged instead of assumed to be 100%. See ADR-0017,
+"Corrections to Phase 2".
+
 ## Consequences
 - 30 new tests (`test_models.py`, `test_safety.py`), all passing —
   covering the exact list Phase 2 of the plan asked for: inside/

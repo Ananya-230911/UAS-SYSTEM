@@ -13,6 +13,12 @@ services/api/*.db-shm
 # Local run artifacts
 .run-logs/
 
+# Secrets (e.g. ANTHROPIC_API_KEY) -- never commit. .env.example files
+# document the variable names and stay committed.
+.env
+.env.*
+!.env.example
+
 # Perception service: YOLO model weights auto-download on first run
 # (see services/perception/app/detection.py) -- a build artifact, not
 # source to commit.

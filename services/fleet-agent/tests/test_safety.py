@@ -140,16 +140,11 @@ def test_altitude_bands_are_deterministic_and_spaced():
 
 def test_separation_conflict_detected_when_routes_are_close_and_coplanar():
     constraints = SafetyConstraints(altitude_band_spacing_m=5.0, min_horizontal_separation_m=10.0)
-    # Same altitude band (both index 0 in sorted order would differ,
-    # so force them onto the same band by giving identical ids' worth
-    # of spacing -- simplest is to call check_separation directly with
-    # equal bands).
     routes = {
         "sim-1": [Waypoint(lat=37.425000, lon=-122.170000, alt_m=20.0)],
-        "sim-2": [Waypoint(lat=37.425001, lon=-122.170001, alt_m=20.0)],  # ~0.1m away
+        "sim-2": [Waypoint(lat=37.425001, lon=-122.170001, alt_m=20.0)],  # ~0.1m away, same height
     }
-    altitude_bands = {"sim-1": 20.0, "sim-2": 20.0}  # not vertically deconflicted
-    issues = check_separation(routes, altitude_bands, constraints)
+    issues = check_separation(routes, constraints)
     assert len(issues) == 1
     assert issues[0].code == "SEPARATION_CONFLICT"
 
@@ -158,10 +153,9 @@ def test_no_separation_conflict_when_vertically_deconflicted():
     constraints = SafetyConstraints(altitude_band_spacing_m=5.0, min_horizontal_separation_m=10.0)
     routes = {
         "sim-1": [Waypoint(lat=37.425000, lon=-122.170000, alt_m=20.0)],
-        "sim-2": [Waypoint(lat=37.425001, lon=-122.170001, alt_m=25.0)],  # same spot, different band
+        "sim-2": [Waypoint(lat=37.425001, lon=-122.170001, alt_m=25.0)],  # same spot, 5m higher
     }
-    altitude_bands = {"sim-1": 20.0, "sim-2": 25.0}  # exactly altitude_band_spacing_m apart
-    assert check_separation(routes, altitude_bands, constraints) == []
+    assert check_separation(routes, constraints) == []
 
 
 def test_no_separation_conflict_when_far_enough_apart_horizontally():
@@ -170,8 +164,22 @@ def test_no_separation_conflict_when_far_enough_apart_horizontally():
         "sim-1": [Waypoint(lat=37.420, lon=-122.175, alt_m=20.0)],
         "sim-2": [Waypoint(lat=37.430, lon=-122.165, alt_m=20.0)],  # far away
     }
-    altitude_bands = {"sim-1": 20.0, "sim-2": 20.0}
-    assert check_separation(routes, altitude_bands, constraints) == []
+    assert check_separation(routes, constraints) == []
+
+
+def test_separation_uses_real_waypoint_altitudes_not_assigned_bands():
+    # Regression: two vehicles get different *assigned* bands, but their
+    # actual waypoints are at the same height in the same spot. The old
+    # band-based check passed this; it must be caught.
+    constraints = SafetyConstraints(altitude_band_spacing_m=5.0, min_horizontal_separation_m=10.0)
+    bands = assign_altitude_bands(["sim-1", "sim-2"], constraints)
+    assert bands["sim-1"] != bands["sim-2"]
+    routes = {
+        "sim-1": [Waypoint(lat=37.425000, lon=-122.170000, alt_m=20.0)],
+        "sim-2": [Waypoint(lat=37.425001, lon=-122.170001, alt_m=20.0)],
+    }
+    issues = check_separation(routes, constraints)
+    assert [i.code for i in issues] == ["SEPARATION_CONFLICT"]
 
 
 def _valid_plan():
