@@ -34,10 +34,16 @@ reliable as it already was.
 
 **What's real vs. simulated — stated plainly, module by module:**
 
-- **Camera (`app/camera.py`) — simulated.** Cycles through a small set
-  of bundled still images per vehicle. There is no physical camera in
-  this project (the same choice ADR-0001 already made for the vehicle
-  itself).
+- **Camera (`app/camera.py`) — simulated by default, real when opted
+  in.** Cycles through a small set of bundled still images per vehicle
+  by default — there is no physical camera in this project's base case
+  (the same choice ADR-0001 already made for the vehicle itself).
+  **Update:** setting `PERCEPTION_USE_WEBCAM=1` switches this to
+  capturing genuinely live frames from the local machine's webcam
+  instead — real sensor input, not simulated, for a demo machine that
+  actually has a camera attached. Off by default (same "off unless you
+  opt in" pattern as `API_KEY`) so CI/tests, which have no camera, stay
+  deterministic and unaffected.
 - **Object detection (`app/detection.py`) — real.** An actual
   pretrained YOLOv8n model (Ultralytics), genuinely run via inference
   on each simulated frame — not a hardcoded or mocked response. This is

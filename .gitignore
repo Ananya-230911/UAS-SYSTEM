@@ -18,6 +18,11 @@ services/api/*.db-shm
 # source to commit.
 services/perception/.models/
 
+# Perception service: captured webcam frames when PERCEPTION_USE_WEBCAM=1
+# (see services/perception/app/camera.py) -- a runtime artifact, not
+# source to commit.
+services/perception/.cache/
+
 # Node (if the gcs-web migration to a build step ever happens)
 node_modules/
 

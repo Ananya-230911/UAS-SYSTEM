@@ -1,9 +1,10 @@
 # services/perception
 
-Perception & AI Decision service — simulated camera/LiDAR sensor input,
-real YOLOv8n object detection, and a retrieval + guardrails safety
-recommendation. See `docs/adr/0015-perception-and-decision.md` for the
-full design and, importantly, exactly what's real vs. simulated here.
+Perception & AI Decision service — simulated camera/LiDAR sensor input
+(or a real local webcam, see below), real YOLOv8n object detection, and
+a retrieval + guardrails safety recommendation. See
+`docs/adr/0015-perception-and-decision.md` for the full design and,
+importantly, exactly what's real vs. simulated here.
 
 **Separate from `services/api` on purpose**: its `ultralytics`
 dependency (which pulls in PyTorch) is large and shouldn't be forced
@@ -43,6 +44,21 @@ artifact, not source).
 On Windows, `scripts/run_perception.ps1` does the above in one command
 (after the one-time `pip install`), in its own window, matching the
 pattern `scripts/run_local.ps1` already uses for the core stack.
+
+### Use a real webcam instead of sample images
+
+Off by default — set `PERCEPTION_USE_WEBCAM=1` before starting the
+service to capture genuinely live frames from the local machine's
+webcam (device 0) instead of cycling through `sample_frames/`:
+```powershell
+$env:PERCEPTION_USE_WEBCAM = "1"
+powershell -ExecutionPolicy Bypass -File scripts\run_perception.ps1
+```
+Requires a camera attached to the machine running this service and
+`opencv-python` installed (already in `requirements.txt`). Each
+**Detect objects**/**Get recommendation** call in the UI captures a
+fresh frame from the camera at that moment and runs real YOLOv8
+detection on it.
 
 ## Tests
 
