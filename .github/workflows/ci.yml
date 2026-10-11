@@ -27,6 +27,10 @@ jobs:
         working-directory: simulation/sitl
         run: pip install -r requirements.txt
 
+      - name: Install fleet-agent deps
+        working-directory: services/fleet-agent
+        run: pip install -r requirements.txt
+
       - name: Test telemetry gateway
         working-directory: services/telemetry-gateway
         run: PYTHONPATH=. pytest tests/ -v
@@ -37,6 +41,10 @@ jobs:
 
       - name: Test simulator
         working-directory: simulation/sitl
+        run: PYTHONPATH=. pytest tests/ -v
+
+      - name: Test fleet-agent
+        working-directory: services/fleet-agent
         run: PYTHONPATH=. pytest tests/ -v
 
       - name: Check gcs-web JS syntax
