@@ -93,11 +93,23 @@ for ($i = 0; $i -lt $Count; $i++) {
 }
 
 $gatewayUrlsJson = ($gatewayUrls | ConvertTo-Json -Compress)
+if ($gatewayUrls.Count -eq 0) { $gatewayUrlsJson = "{}" }
+
+# Set GATEWAY_URLS_JSON on THIS script's own process rather than
+# embedding it as literal text inside the child's -Command string --
+# the JSON value's own double quotes get mangled when a string
+# containing embedded double quotes is nested inside the single-quoted
+# wrapper inside the double-quoted -Command argument inside
+# Start-Process's -ArgumentList (three layers of requoting is one too
+# many). Start-Process's child inherits the parent's environment by
+# default, so setting it here reaches the API process just as reliably
+# and far more simply.
+$env:GATEWAY_URLS_JSON = $gatewayUrlsJson
 
 Write-Host "Starting API for a $Count-vehicle fleet..."
 Start-Process powershell -ArgumentList @(
     "-NoExit", "-Command",
-    "cd '$root\services\api'; `$env:GATEWAY_URLS_JSON = '$gatewayUrlsJson'; & '$venvPython' -m uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    "cd '$root\services\api'; & '$venvPython' -m uvicorn app.main:app --host 0.0.0.0 --port 8000"
 )
 Wait-Health "http://127.0.0.1:8000/health" "API"
 Write-Host "API is up, routing: $gatewayUrlsJson"
