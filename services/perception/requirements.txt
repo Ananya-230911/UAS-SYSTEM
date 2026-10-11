@@ -6,3 +6,4 @@ numpy>=1.26
 scikit-learn>=1.4
 ultralytics>=8.3
 opencv-python>=4.9
+pytest>=8,<9
