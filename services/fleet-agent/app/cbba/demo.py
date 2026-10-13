@@ -89,8 +89,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  ignored {x.item_id}: {x.reason}")
 
     same = [(p.drone_id, p.path) for p in result.plans] == [(p.drone_id, p.path) for p in reference.plans]
-    print(f"\nTotal score {result.total_score:.1f}; centralised reference (SGA) {reference.total_score:.1f} "
-          f"-> same allocation: {'yes' if same else 'no'}")
+    if any(i.code == "DUPLICATE_ASSIGNMENT" for i in result.safety.issues):
+        print(f"\nTotal score: not meaningful (points claimed twice are counted twice); "
+              f"centralised reference (SGA) {reference.total_score:.1f}")
+    else:
+        print(f"\nTotal score {result.total_score:.1f}; centralised reference (SGA) {reference.total_score:.1f} "
+              f"-> same allocation: {'yes' if same else 'no'}")
 
     if result.safety.valid:
         print("Safety gate: PASSED")

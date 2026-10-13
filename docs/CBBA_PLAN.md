@@ -331,7 +331,8 @@ class Transport(Protocol):
 - **C — Tests** (`tests/cbba/`):
   - determinism;
   - conflict-free;
-  - matches SGA on a fully connected graph (Theorem 1);
+  - keeps at least 50% of the SGA score (exact SGA match is measured,
+    not guaranteed -- see ADR-0018);
   - converges within `N·D` rounds;
   - consensus table cases;
   - lost drone → reallocated;

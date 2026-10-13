@@ -92,7 +92,8 @@ takes over and the demo says so. See `.env.example`; never commit a key.
 cd services/fleet-agent
 PYTHONPATH=. pytest tests/ -v
 ```
-No simulator, GPU, network, or API key needed.
+No simulator, GPU, network, or API key needed. The CBBA tests alone:
+`PYTHONPATH=. pytest tests/cbba -q` (324 tests, ~5 s).
 
 ## Known limitations
 

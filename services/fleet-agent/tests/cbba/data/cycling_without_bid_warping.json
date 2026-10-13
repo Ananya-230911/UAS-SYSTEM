@@ -1,0 +1,275 @@
+{
+ "drones": [
+  {
+   "drone_id": "d0",
+   "start": {
+    "lat": 37.43037647689317,
+    "lon": -122.16664486211926,
+    "alt_m": 0.0
+   },
+   "battery_pct": 93.2636114827557,
+   "capabilities": [
+    "camera",
+    "thermal"
+   ],
+   "health": "OK"
+  },
+  {
+   "drone_id": "d1",
+   "start": {
+    "lat": 37.42577990218229,
+    "lon": -122.16746035604653,
+    "alt_m": 0.0
+   },
+   "battery_pct": 70.46205804647647,
+   "capabilities": [
+    "thermal"
+   ],
+   "health": "OK"
+  },
+  {
+   "drone_id": "d2",
+   "start": {
+    "lat": 37.42754452257667,
+    "lon": -122.16778064162251,
+    "alt_m": 0.0
+   },
+   "battery_pct": 76.93866515292301,
+   "capabilities": [],
+   "health": "OK"
+  },
+  {
+   "drone_id": "d3",
+   "start": {
+    "lat": 37.426732136927754,
+    "lon": -122.16544028265132,
+    "alt_m": 0.0
+   },
+   "battery_pct": 97.78687374340754,
+   "capabilities": [
+    "camera"
+   ],
+   "health": "OK"
+  },
+  {
+   "drone_id": "d4",
+   "start": {
+    "lat": 37.425973808031614,
+    "lon": -122.16782333863213,
+    "alt_m": 0.0
+   },
+   "battery_pct": 91.4827641556562,
+   "capabilities": [
+    "thermal",
+    "camera"
+   ],
+   "health": "OK"
+  }
+ ],
+ "points": [
+  {
+   "point_id": "p00",
+   "lat": 37.42918649639581,
+   "lon": -122.16562562028875,
+   "required_capability": null,
+   "value": 100.0,
+   "inspect_duration_s": 0.0,
+   "deadline_s": 60.0
+  },
+  {
+   "point_id": "p01",
+   "lat": 37.42904502326498,
+   "lon": -122.16572013435484,
+   "required_capability": null,
+   "value": 100.0,
+   "inspect_duration_s": 10.0,
+   "deadline_s": 60.0
+  },
+  {
+   "point_id": "p02",
+   "lat": 37.42917797527198,
+   "lon": -122.1667788848361,
+   "required_capability": "thermal",
+   "value": 150.0,
+   "inspect_duration_s": 10.0,
+   "deadline_s": 60.0
+  },
+  {
+   "point_id": "p03",
+   "lat": 37.43011387251574,
+   "lon": -122.16901224996347,
+   "required_capability": null,
+   "value": 50.0,
+   "inspect_duration_s": 0.0,
+   "deadline_s": 200.0
+  },
+  {
+   "point_id": "p04",
+   "lat": 37.42601382958514,
+   "lon": -122.16737632242014,
+   "required_capability": "camera",
+   "value": 100.0,
+   "inspect_duration_s": 0.0,
+   "deadline_s": 60.0
+  },
+  {
+   "point_id": "p05",
+   "lat": 37.42902698584052,
+   "lon": -122.17083357262507,
+   "required_capability": "camera",
+   "value": 50.0,
+   "inspect_duration_s": 0.0,
+   "deadline_s": null
+  },
+  {
+   "point_id": "p06",
+   "lat": 37.42720862164913,
+   "lon": -122.16881287627014,
+   "required_capability": "thermal",
+   "value": 100.0,
+   "inspect_duration_s": 0.0,
+   "deadline_s": 60.0
+  },
+  {
+   "point_id": "p07",
+   "lat": 37.429080442021196,
+   "lon": -122.17148993278359,
+   "required_capability": "thermal",
+   "value": 150.0,
+   "inspect_duration_s": 0.0,
+   "deadline_s": 60.0
+  },
+  {
+   "point_id": "p08",
+   "lat": 37.43060866599598,
+   "lon": -122.17144490553078,
+   "required_capability": null,
+   "value": 100.0,
+   "inspect_duration_s": 10.0,
+   "deadline_s": 200.0
+  },
+  {
+   "point_id": "p09",
+   "lat": 37.429847907498946,
+   "lon": -122.1657841899113,
+   "required_capability": null,
+   "value": 100.0,
+   "inspect_duration_s": 10.0,
+   "deadline_s": null
+  },
+  {
+   "point_id": "p10",
+   "lat": 37.4268473952421,
+   "lon": -122.17062898906998,
+   "required_capability": null,
+   "value": 50.0,
+   "inspect_duration_s": 0.0,
+   "deadline_s": null
+  },
+  {
+   "point_id": "p11",
+   "lat": 37.42731231007149,
+   "lon": -122.16897184842496,
+   "required_capability": null,
+   "value": 100.0,
+   "inspect_duration_s": 0.0,
+   "deadline_s": 60.0
+  },
+  {
+   "point_id": "p12",
+   "lat": 37.4252316127617,
+   "lon": -122.16872221316783,
+   "required_capability": null,
+   "value": 100.0,
+   "inspect_duration_s": 0.0,
+   "deadline_s": 60.0
+  },
+  {
+   "point_id": "p13",
+   "lat": 37.42854252985928,
+   "lon": -122.16669383773093,
+   "required_capability": "thermal",
+   "value": 100.0,
+   "inspect_duration_s": 10.0,
+   "deadline_s": 60.0
+  },
+  {
+   "point_id": "p14",
+   "lat": 37.42560813245468,
+   "lon": -122.1671293016948,
+   "required_capability": null,
+   "value": 100.0,
+   "inspect_duration_s": 10.0,
+   "deadline_s": null
+  },
+  {
+   "point_id": "p15",
+   "lat": 37.429603046140286,
+   "lon": -122.17074815474939,
+   "required_capability": null,
+   "value": 150.0,
+   "inspect_duration_s": 0.0,
+   "deadline_s": null
+  }
+ ],
+ "geofence": {
+  "points": [
+   {
+    "lat": 37.425,
+    "lon": -122.172
+   },
+   {
+    "lat": 37.425,
+    "lon": -122.165
+   },
+   {
+    "lat": 37.431,
+    "lon": -122.165
+   },
+   {
+    "lat": 37.431,
+    "lon": -122.172
+   }
+  ]
+ },
+ "constraints": {
+  "min_altitude_m": 5.0,
+  "max_altitude_m": 120.0,
+  "altitude_band_spacing_m": 5.0,
+  "min_horizontal_separation_m": 10.0,
+  "battery_reserve_pct": 20.0,
+  "cruise_speed_ms": 8.0,
+  "battery_drain_pct_per_min": 0.6
+ },
+ "comms": {
+  "links": [
+   [
+    "d3",
+    "d0"
+   ],
+   [
+    "d4",
+    "d0"
+   ],
+   [
+    "d2",
+    "d4"
+   ],
+   [
+    "d1",
+    "d2"
+   ],
+   [
+    "d0",
+    "d4"
+   ]
+  ],
+  "range_m": null
+ },
+ "config": {
+  "discount_per_s": 0.995,
+  "max_bundle_size": 6,
+  "max_rounds": 500
+ },
+ "base_altitude_m": 20.0
+}

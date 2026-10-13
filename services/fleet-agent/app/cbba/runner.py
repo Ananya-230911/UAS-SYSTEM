@@ -49,13 +49,19 @@ def run_cbba(
     config: CbbaConfig,
     graph: CommsGraph,
     altitudes: dict[str, float],
+    link_events: dict[int, list[tuple[str, str, bool]]] | None = None,
 ) -> CbbaRun:
+    """link_events: optional {round: [(drone_a, drone_b, up), ...]} --
+    links cut (up=False) or restored (up=True) at the start of that
+    round, to simulate radios dropping out and coming back. The run is
+    never declared converged before the last scheduled event."""
+    link_events = link_events or {}
+    last_event = max(link_events, default=0)
     agents = {
         d.drone_id: CbbaAgent(d, points, constraints, config, altitudes[d.drone_id])
         for d in sorted(drones, key=lambda d: d.drone_id)
     }
     transport = InMemoryTransport(graph)
-    needed_stable = max(1, graph.diameter())
     stable = 0
     rounds = 0
     last_change = 0
@@ -63,6 +69,9 @@ def run_cbba(
 
     for round_no in range(1, config.max_rounds + 1):
         rounds = round_no
+        for a, b, up in link_events.get(round_no, []):
+            graph.set_link(a, b, up)
+            stable = 0  # the network changed: start counting quiet rounds again
         before = {aid: a.state() for aid, a in agents.items()}
 
         for agent in agents.values():
@@ -78,7 +87,8 @@ def run_cbba(
         if changed:
             last_change = round_no
         stable = 0 if changed else stable + 1
-        if stable >= needed_stable and groups_agree(agents, graph):
+        needed_stable = max(1, graph.diameter())
+        if round_no >= last_event and stable >= needed_stable and groups_agree(agents, graph):
             converged = True
             break
 

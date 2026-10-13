@@ -114,15 +114,31 @@ it.
   | Safety gate passed | 400/400 |
   | Identical output when re-run (deterministic) | 400/400 |
   | Settled within the paper's bound, N_min·D rounds (N_min = min(points, drones × bundle limit)) | 400/400 |
-  | Identical to SGA, fully connected graphs | 200/200 |
-  | Identical to SGA, multi-hop graphs | 198/200 |
 
-- **About the 2 multi-hop differences.** Both happened in runs where bid
-  warping was active. In runs where warping never fired (a truly DMG
-  score), CBBA matched SGA every time. With warping, the published
-  guarantees are convergence and a performance bound, not exact SGA
-  equality over multi-hop graphs. Tests will therefore assert SGA
-  equality only for fully connected graphs.
+- **Correction made in Phase C: CBBA does not always equal SGA.**
+  - Phase B reported 200/200 identical to SGA on fully connected graphs
+    and 198/200 on multi-hop ones. Phase C's larger random set found a
+    fully connected case that differs (random case 44 in
+    `tests/cbba/test_allocate.py`).
+  - **Cause.** Drones bid simultaneously. In round 1, d2 bid on p06
+    while also holding p02, which it lost to d0 in that same round.
+    d0 believed d2's bid, gave up p06, and filled its last bundle slot
+    with p08. d2's real bid on p06 turned out lower, but d0's bundle was
+    full and nothing outbid p08, so d0 never revisited p06.
+  - The result is still converged, conflict-free and safe, just a
+    different allocation from SGA's.
+  - **Measured on 600 + 600 random cases:**
+
+    | Comms | Identical to SGA | Worst CBBA score vs SGA | CBBA higher than SGA |
+    |---|---|---|---|
+    | Fully connected | 593/600 | 96.4% | 4 cases |
+    | Multi-hop | 592/600 | 97.3% | 2 cases |
+
+  - **What the tests now assert:**
+    - On every case, the guarantee that follows from the paper:
+      CBBA ≥ 50% of SGA (CBBA ≥ 50% of optimal, and SGA ≤ optimal).
+    - Exact equality only for the sample scenario.
+    - A measured floor: at least 95% identical on the fixed test set.
 - The safety gate was hand-checked against tampered plans. Each one was
   blocked with the right code:
   - a thermal point given to a camera-only drone;
@@ -150,3 +166,40 @@ it.
   position and every round. That is fine at demo scale (well under a
   second for 3 drones and 11 points) but has not been tuned for large
   fleets.
+
+## Phase C: tests (added later)
+`services/fleet-agent/tests/cbba/`, run by the existing CI fleet-agent job
+(`PYTHONPATH=. pytest tests/`). 324 tests, about 5 seconds, no network, no
+LLM, no simulator.
+
+| File | What it covers |
+|---|---|
+| `test_consensus.py` | Every cell of Table I; bundle release (eq. 6); timestamps (eq. 5); bid warping on a layout where the true gain really rises, with a check that warping fired |
+| `test_scoring_and_network.py` | Score formula; hover time; deadlines; endurance identical to the validator at the reserve boundary; sensor rule; insertion position; tie-break table; comms graph (full / range / links / cuts / diameter); transport drops unreachable messages |
+| `test_safety_gate.py` | Every block reason on hand-made plans; the battery-reserve boundary both ways |
+| `test_allocate.py` | See the list below |
+
+`test_allocate.py` covers:
+- the sample scenario;
+- unassigned and ignored points with their reasons;
+- sensors and deadlines respected;
+- a lost drone's points reallocated;
+- relayed comms giving the same answer;
+- split comms blocked;
+- edge cases: no drones, out of reach, bundle limit, round limit,
+  duplicate ids;
+- 120 fixed random cases checked for: converged, agreement,
+  conflict-free, safe, deterministic, within N_min·D rounds, and ≥ 50%
+  of SGA's score;
+- a measured floor of ≥ 95% identical to SGA;
+- the frozen cycling case (`data/cycling_without_bid_warping.json`):
+  it converges, and it provably cycles again if warping is switched off;
+- partition and merge, a partition that never heals, and no early stop
+  before a scheduled link change;
+- the demo in all four modes;
+- `app/cbba` imports no LLM, network or flight library (rules 1 and 5,
+  enforced).
+
+The runner gained optional `link_events` (cut or restore links at given
+rounds) for the partition/merge tests. Phase E's comms-failure scenarios
+will reuse it.

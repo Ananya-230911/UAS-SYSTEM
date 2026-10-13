@@ -7,10 +7,11 @@ One "central" loop that sees every drone at once. Each step:
   - the highest bid wins (tie: lower drone id); that point is assigned.
 Repeat until nobody can add a point.
 
-Same scoring, insertion rule, bid warping and tie breaks as CBBA. With a
-fully connected comms graph, CBBA's decentralised rounds should land on
-exactly this allocation (paper, Theorem 1, applied to the warped bids),
-so SGA is the oracle CBBA is tested against. It never dispatches
+Same scoring, insertion rule, bid warping and tie breaks as CBBA, so it
+is the reference CBBA is tested against: CBBA must keep at least half of
+SGA's score (a consequence of the paper's 50%-of-optimal guarantee), and
+in practice matches it exactly about 99% of the time -- not always,
+because drones bid simultaneously (see ADR-0018). It never dispatches
 anything. (The existing app/planning/allocation.py auction is a
 coverage-cell auction with a different cost, so it can't serve as this
 oracle; it stays untouched.)
