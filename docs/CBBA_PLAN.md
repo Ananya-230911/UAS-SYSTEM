@@ -1,7 +1,8 @@
 # CBBA Multi-Drone Task Allocation — Revised Plan (for approval)
 
-Status: **APPROVED.** Phases A-D done (ADR-0018, ADR-0019); a first slice
-of F (map panel, mission editor, replay, simulated flight) was built early. One deviation found while building
+Status: **APPROVED.** Phases A-E done (ADR-0018, ADR-0019, ADR-0020); most
+of F (map panel, mission editor, replay, live-agent playback) was built
+along the way. Remaining: G (scenario tests), F polish. One deviation found while building
 Phase B: bid warping was added to the bundle phase (section 2A, Decide).
 
 Simulation only. These are inspection scenarios: drones visit inspection

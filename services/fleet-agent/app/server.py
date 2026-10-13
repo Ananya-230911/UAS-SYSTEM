@@ -27,6 +27,8 @@ from app.mission.goal_parser import NeedsClarification
 from app.store import InMemoryMissionStore, MissionStore, Source
 from app.supervisor.gate import IntentGate
 from app.supervisor.instructions import RuleBasedInstructionParser, interpret_instruction
+from app.sim.models import SimRequest, SimResult
+from app.sim.world import run_simulation
 
 app = FastAPI(title="UAS-SYSTEM Fleet-Agent (CBBA simulation)", version="0.1.0")
 
@@ -171,6 +173,43 @@ def cbba_instruct(req: InstructRequest) -> dict:
         "accepted": [{"change": text, "intent": it.model_dump()} for it, text in decision.accepted],
         "rejected": [{"change": it.describe(), "reason": why, "intent": it.model_dump()} for it, why in decision.rejected],
         "scenario": decision.scenario.model_dump(mode="json") if decision.changed else None,
+    }
+
+
+@app.post("/sim/run", response_model=SimResult)
+def sim_run(req: SimRequest) -> SimResult:
+    """Phase E: fly the mission as live agents (heartbeats, simulated lossy
+    radio, injected failures, re-planning), all in-process and
+    deterministic for a given seed. Returns every frame for playback.
+    Every plan any drone follows has passed the safety gate."""
+    return run_simulation(req.scenario, req.config, req.events)
+
+
+@app.get("/fleet/live")
+def fleet_live() -> dict:
+    """READ-ONLY: current positions and batteries of the running simulated
+    fleet from services/api (GET requests only -- nothing is sent to any
+    drone), to use as start positions. Stale or incomplete vehicles are
+    skipped and listed, never filled in. FLEET_API_URL / FLEET_API_KEY
+    override the defaults."""
+    import os
+    import urllib.error
+
+    from app.demo import load_live_fleet
+
+    api = os.environ.get("FLEET_API_URL", "http://localhost:8000")
+    try:
+        vehicles, fence, notes = load_live_fleet(api, os.environ.get("FLEET_API_KEY") or None)
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail=f"could not read the live fleet from {api}: {exc}") from exc
+    return {
+        "api": api,
+        "drones": [
+            {"id": v.vehicle_id, "lat": v.home.lat, "lon": v.home.lon, "battery": round(v.battery_pct, 1)}
+            for v in vehicles.values()
+        ],
+        "fence": [p.model_dump() for p in fence.points] if fence else None,
+        "notes": notes,
     }
 
 

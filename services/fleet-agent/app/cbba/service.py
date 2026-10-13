@@ -103,29 +103,34 @@ def _unassigned_reason(point: InspectionPoint, drones: list[DroneSpec], scenario
     return "every capable drone was full (bundle limit) or adding it would break a deadline or the battery reserve"
 
 
-def allocate(scenario: Scenario, method: str = "CBBA", trace: list | None = None) -> CbbaResult:
-    """trace: pass an empty list to have it filled with one TraceRound per
-    CBBA round (how the drones decided -- for display). Ignored for SGA."""
-    if method not in ("CBBA", "SGA"):
-        raise ValueError("method must be 'CBBA' or 'SGA'")
-    drones, excluded_drones, points, excluded_points = _split_inputs(scenario)
-    altitudes = assign_altitude_bands([d.drone_id for d in drones], scenario.constraints, scenario.base_altitude_m)
+def split_inputs(scenario: Scenario):
+    """(drones that take part, drones left out with reasons, points inside
+    the fence, points left out with reasons). Public for app/sim."""
+    return _split_inputs(scenario)
+
+
+def build_result(
+    scenario: Scenario,
+    drones: list[DroneSpec],
+    excluded_drones: list[ExcludedItem],
+    points: list[InspectionPoint],
+    excluded_points: list[ExcludedItem],
+    altitudes: dict[str, float],
+    paths: dict[str, tuple[list[str], list[str]]],
+    *,
+    method: str,
+    label: str,
+    converged: bool,
+    agreement: bool,
+    groups: list[list[str]],
+    rounds: int = 0,
+    last_change: int = 0,
+    messages: int = 0,
+) -> CbbaResult:
+    """Turn each drone's (path, bundle) into DronePlans, list what wasn't
+    assigned and why, and run the safety gate. Shared by allocate() and
+    the live-agent simulation (app/sim), so both are judged identically."""
     by_id = {p.point_id: p for p in points}
-
-    if method == "CBBA" and drones:
-        graph = CommsGraph.from_spec(_live_links(scenario, drones), drones)
-        run = run_cbba(drones, points, scenario.constraints, scenario.config, graph, altitudes, trace=trace)
-        paths = {aid: (a.path, a.bundle) for aid, a in run.agents.items()}
-        converged, agreement, label = run.converged, run.agreement, SIM_LABEL
-        groups = graph.components()
-        rounds, last_change, messages = run.rounds, run.last_change_round, run.messages_sent
-    else:
-        paths = run_sga(drones, points, scenario.constraints, scenario.config, altitudes) if drones else {}
-        converged, agreement = bool(drones), True
-        groups = [[d.drone_id for d in drones]] if drones else []
-        rounds, last_change, messages = 0, 0, 0
-        label = SGA_LABEL if method == "SGA" else SIM_LABEL
-
     drone_by_id = {d.drone_id: d for d in drones}
     plans = [
         _drone_plan(drone_by_id[did], path, bundle, by_id, scenario, altitudes[did])
@@ -175,3 +180,31 @@ def allocate(scenario: Scenario, method: str = "CBBA", trace: list | None = None
         dispatch_allowed=converged and safety.valid,
     )
 
+
+def allocate(
+    scenario: Scenario, method: str = "CBBA", trace: list | None = None, altitudes: dict[str, float] | None = None
+) -> CbbaResult:
+    """trace: pass an empty list to have it filled with one TraceRound per
+    CBBA round (how the drones decided -- for display). Ignored for SGA.
+    altitudes: fixed altitude per drone id (default: fresh bands)."""
+    if method not in ("CBBA", "SGA"):
+        raise ValueError("method must be 'CBBA' or 'SGA'")
+    drones, excluded_drones, points, excluded_points = _split_inputs(scenario)
+    if altitudes is None:
+        altitudes = assign_altitude_bands([d.drone_id for d in drones], scenario.constraints, scenario.base_altitude_m)
+
+    if method == "CBBA" and drones:
+        graph = CommsGraph.from_spec(_live_links(scenario, drones), drones)
+        run = run_cbba(drones, points, scenario.constraints, scenario.config, graph, altitudes, trace=trace)
+        paths = {aid: (a.path, a.bundle) for aid, a in run.agents.items()}
+        return build_result(
+            scenario, drones, excluded_drones, points, excluded_points, altitudes, paths,
+            method=method, label=SIM_LABEL, converged=run.converged, agreement=run.agreement,
+            groups=graph.components(), rounds=run.rounds, last_change=run.last_change_round, messages=run.messages_sent,
+        )
+    paths = run_sga(drones, points, scenario.constraints, scenario.config, altitudes) if drones else {}
+    return build_result(
+        scenario, drones, excluded_drones, points, excluded_points, altitudes, paths,
+        method=method, label=SGA_LABEL if method == "SGA" else SIM_LABEL, converged=bool(drones), agreement=True,
+        groups=[[d.drone_id for d in drones]] if drones else [],
+    )

@@ -127,6 +127,9 @@
           <button id="btn-cbba-example">Load Stanford example</button>
           <button id="btn-cbba-clear-all">Clear all</button>
         </div>
+        <div class="button-row">
+          <button id="btn-cbba-import-live" title="Read-only: copies the positions and batteries of the running simulated drones (run_fleet.ps1)">Use my running drones' positions</button>
+        </div>
       </section>
 
       <section class="section-cbba">
@@ -176,9 +179,39 @@
       </section>
 
       <section class="section-cbba">
-        <h2>4 · Simulated flight</h2>
+        <h2>4 · Live agents (simulated flight)</h2>
+        <p class="hint">
+          Every drone runs its own loop: sends heartbeats, bids, notices
+          teammates that go silent and re-plans. Choose how good the radio
+          is and what goes wrong, then Run. Simulation on the server -- no
+          vehicle is involved.
+        </p>
+        <label class="cbba-field">Messages lost
+          <select id="cbba-sim-loss"><option value="0">none</option><option value="0.1">10%</option><option value="0.3">30%</option><option value="0.5">50%</option></select>
+        </label>
+        <label class="cbba-field">Messages arrive late by
+          <select id="cbba-sim-delay"><option value="0">0 s</option><option value="1">1 s</option><option value="2">2 s</option></select>
+        </label>
+        <label class="cbba-field">Declare a drone lost after silence of (s)
+          <input type="number" id="cbba-sim-timeout" min="2" max="120" value="5" />
+        </label>
+        <div class="perception-heading">What goes wrong</div>
+        <div class="cbba-row-line">
+          at <input type="number" id="cbba-fail-at" min="0" value="40" class="cbba-sec" aria-label="time in seconds" /> s
+          <select id="cbba-fail-drone" aria-label="drone"></select>
+          <select id="cbba-fail-kind" aria-label="what happens">
+            <option value="drone_lost">is lost (crash)</option>
+            <option value="radio_cut">radio breaks</option>
+            <option value="radio_restored">radio works again</option>
+            <option value="battery_drop">battery drops to</option>
+          </select>
+          <span id="cbba-fail-battery-wrap" hidden><input type="number" id="cbba-fail-battery" min="0" max="100" value="21" class="cbba-sec" />%</span>
+          <button id="btn-cbba-fail-add">Add</button>
+        </div>
+        <ul id="cbba-fail-list" class="cbba-list"></ul>
         <div class="button-row">
-          <button id="btn-cbba-fly">Fly (simulated)</button>
+          <button id="btn-cbba-fly">Run live simulation</button>
+          <button id="btn-cbba-sim-play" disabled>Play</button>
           <select id="cbba-fly-speed" aria-label="speed">
             <option value="5">5× speed</option>
             <option value="10" selected>10× speed</option>
@@ -186,11 +219,12 @@
             <option value="50">50× speed</option>
           </select>
         </div>
+        <input type="range" id="cbba-sim-time" min="0" max="0" step="1" value="0" aria-label="mission time" />
         <div class="button-row">
           <select id="cbba-fail-select" aria-label="drone to fail"></select>
-          <button id="btn-cbba-fail">Make this drone fail</button>
+          <button id="btn-cbba-fail" disabled>Make this drone fail now</button>
         </div>
-        <p id="cbba-fly-status" class="cbba-line cbba-muted"></p>
+        <div id="cbba-sim-status" class="cbba-line cbba-muted"></div>
         <ul id="cbba-fly-log" class="cbba-list cbba-log"></ul>
       </section>
 

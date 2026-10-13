@@ -75,6 +75,18 @@ without the flight simulators running. `app/server.py` is read-only:
 | `app/cbba/safety_gate.py` | Fence, altitude, battery, sensor, deadline, duplicate checks -- reuses `app/safety/validator.py` |
 | `app/cbba/service.py` | `allocate(scenario)` -- the single entry point |
 
+## Live agents (Phase E)
+
+In the GCS panel, section **4 · Live agents**: choose how bad the radio is
+(lost / late messages), schedule what goes wrong (a drone crashes, a radio
+breaks or comes back, a battery drops), and press **Run live simulation**.
+Every drone runs its own loop -- heartbeats, CBBA bids over the lossy radio,
+noticing silent teammates, re-planning -- and you can scrub through the
+replay or press **Make this drone fail now**. **Use my running drones'
+positions** reads (GET only) where your `run_fleet.ps1` simulators are.
+Server: `app/sim/`, `POST /sim/run`, `GET /fleet/live`. See
+`docs/adr/0020-cbba-phase-e-live-agents.md`.
+
 ## Tell the drones (Phase D, optional AI)
 
 In the GCS panel, type e.g. *"P3 is high priority, P2 needs thermal, D2 is

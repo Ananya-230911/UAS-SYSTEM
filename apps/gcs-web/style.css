@@ -820,3 +820,16 @@ main {
 }
 #btn-cbba-apply:not(:disabled) { background: #16a34a; border-color: #16a34a; color: white; }
 .cbba-ok li { color: #15803d; }
+
+.cbba-sec { width: 3.6rem; }
+#cbba-sim-time { width: 100%; margin: 0.3rem 0; accent-color: #7c3aed; }
+#cbba-fail-drone, #cbba-fail-kind { padding: 0.25rem 0.3rem; border: 1px solid var(--border); border-radius: 5px; font-size: 0.76rem; }
+#cbba-fail-at, #cbba-fail-battery, #cbba-sim-timeout { padding: 0.2rem 0.35rem; border: 1px solid var(--border); border-radius: 5px; font-size: 0.78rem; }
+#cbba-sim-timeout { width: 4rem; }
+.cbba-point--planned { border-style: dashed; }
+.cbba-drone--nolink span { background: #fef3c7; color: #b45309; border-color: #b45309; }
+.cbba-ev--detect, .cbba-ev--lost-link { color: #b45309; }
+.cbba-ev--inject { color: var(--red); }
+.cbba-ev--replan, .cbba-ev--plan { color: #5b21b6; }
+.cbba-ev--blocked { color: var(--red); font-weight: 600; }
+.cbba-summary { background: var(--green-light); color: #14532d; padding: 0.4rem !important; border-radius: 6px; }

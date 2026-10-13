@@ -220,39 +220,44 @@ function cbbaEventText(e) {
   return `${e.drone} drops ${e.point} for now (conflicting news) and will bid again`;
 }
 
-// A drone's planned route -> timed legs for the flight simulation.
-// Arrival times at points come from the server; the final leg home is
-// distance / cruise speed.
-function cbbaTimeline(plan, pointsById, speedMs) {
-  const legs = [];
-  if (!plan.route || plan.route.length < 2) return { legs, end: 0 };
-  let t = 0;
-  for (let i = 0; i < plan.path.length; i++) {
-    const from = plan.route[i], to = plan.route[i + 1];
-    const arrive = plan.arrival_s[i];
-    legs.push({ from, to, t0: t, t1: arrive, point: plan.path[i] });
-    t = arrive + Number((pointsById[plan.path[i]] || {}).inspect_duration_s || 0);
+// Live-agent simulation playback (server: POST /sim/run). Frames are one
+// per tick, in time order; the frame shown at time t is the last one not
+// after t.
+function cbbaFrameAt(frames, t) {
+  if (!frames.length) return null;
+  let lo = 0, hi = frames.length - 1;
+  if (t <= frames[0].t) return frames[0];
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (frames[mid].t <= t) lo = mid;
+    else hi = mid - 1;
   }
-  const last = plan.route[plan.route.length - 2], home = plan.route[plan.route.length - 1];
-  const back = cbbaDistanceM(last, home) / speedMs;
-  legs.push({ from: last, to: home, t0: t, t1: t + back, point: null });
-  return { legs, end: t + back };
+  return frames[lo];
 }
 
-function cbbaPositionAt(timeline, t) {
-  const { legs } = timeline;
-  if (legs.length === 0) return null;
-  if (t <= 0) return { lat: legs[0].from.lat, lon: legs[0].from.lon };
-  for (const leg of legs) {
-    if (t <= leg.t0) return { lat: leg.from.lat, lon: leg.from.lon }; // hovering before this leg
-    if (t <= leg.t1) {
-      const f = leg.t1 > leg.t0 ? (t - leg.t0) / (leg.t1 - leg.t0) : 1;
-      return { lat: leg.from.lat + (leg.to.lat - leg.from.lat) * f, lon: leg.from.lon + (leg.to.lon - leg.from.lon) * f };
-    }
+// point_id -> drone that first inspected it, from the event log up to t.
+function cbbaInspectorsUpTo(events, t) {
+  const out = {};
+  for (const e of events) {
+    if (e.t > t) break;
+    if (e.kind !== "inspect") continue;
+    const m = /inspected (\S+?)(?: \(|\.$)/.exec(e.text);
+    if (m && !(m[1] in out)) out[m[1]] = e.drone;
   }
-  const end = legs[legs.length - 1].to;
-  return { lat: end.lat, lon: end.lon };
+  return out;
 }
+
+// The plan in force at time t: the last planning round started by then.
+function cbbaEpochAt(epochs, t) {
+  let cur = null;
+  for (const ep of epochs) if (ep.started_t <= t) cur = ep;
+  return cur;
+}
+
+const CBBA_STATUS_TEXT = {
+  planning: "deciding", flying: "flying", holding: "holding (re-planning)", returning: "returning home",
+  home: "home", lost: "LOST", offline: "offline", "lost-link": "no radio contact",
+};
 
 function cbbaGroupIssues(issues) {
   const groups = [];
@@ -296,7 +301,8 @@ function cbbaShortName(pointId) {
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     cbbaDroneColor, cbbaDistanceM, cbbaAutoFence, cbbaLinks, cbbaBuildScenario, cbbaCheckState,
-    cbbaPointStatuses, cbbaClaimOwners, cbbaApplyScenario, cbbaReplaySteps, cbbaEventText, cbbaTimeline, cbbaPositionAt,
+    cbbaPointStatuses, cbbaClaimOwners, cbbaApplyScenario, cbbaReplaySteps, cbbaEventText,
+    cbbaFrameAt, cbbaInspectorsUpTo, cbbaEpochAt, CBBA_STATUS_TEXT,
     cbbaGroupIssues, cbbaAgreementText, cbbaEscape, cbbaShortName, CBBA_COLORS,
   };
 }
@@ -331,7 +337,8 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
   let last = null; // last server response {scenario, result, reference, trace}
   let steps = [];
   let stepIdx = 0;
-  const fly = { running: false, t: 0, offset: 0, speed: 10, inspected: new Set(), inspectedBy: {}, failed: {}, timelines: {}, raf: null, lastTs: null, log: [] };
+  // Live-agent simulation playback
+  const sim = { data: null, t: 0, running: false, speed: 10, raf: null, lastTs: null, failures: [] };
 
   function save() {
     try {
@@ -361,7 +368,8 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
 
   // Any edit makes the old plan stale.
   function edited() {
-    stopFlight();
+    stopSim();
+    sim.data = null;
     last = null;
     steps = [];
     view = "edit";
@@ -426,7 +434,7 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
   // ---- map drawing -----------------------------------------------------------
   function droneIcon(id, opts = {}) {
     const c = opts.grey ? "#94a3b8" : color(id);
-    const cls = "cbba-drone" + (opts.grey ? " cbba-drone--off" : "") + (opts.failed ? " cbba-drone--failed" : "");
+    const cls = "cbba-drone" + (opts.grey ? " cbba-drone--off" : "") + (opts.failed ? " cbba-drone--failed" : "") + (opts.nolink ? " cbba-drone--nolink" : "");
     return L.divIcon({
       className: "cbba-drone-wrap",
       html: `<div class="${cls}" style="color:${c}">▲<span>${esc(id)}</span></div>`,
@@ -468,13 +476,22 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
     const pointsById = {};
     if (last) for (const p of last.scenario.points) pointsById[p.point_id] = p;
 
-    // Routes
-    if (result && (view === "plan" || view === "fly")) {
-      for (const plan of result.plans) {
-        if (!plan.route.length) continue;
-        L.polyline(plan.route.map((w) => [w.lat, w.lon]), {
-          color: color(plan.drone_id), weight: view === "fly" ? 3 : 4, opacity: view === "fly" ? 0.35 : 0.85, ...noBubble,
-        }).bindTooltip(`${plan.drone_id}: ${Math.round(plan.route_m)} m at ${plan.altitude_m} m altitude`).addTo(layer);
+    // Routes: the plan (plan view) or the plan in force at time t (sim view)
+    const simFrame = view === "sim" && sim.data ? cbbaFrameAt(sim.data.frames, sim.t) : null;
+    const simEpoch = view === "sim" && sim.data ? cbbaEpochAt(sim.data.epochs, sim.t) : null;
+    const routePlans = view === "plan" && result ? result.plans : simEpoch && simEpoch.result.dispatch_allowed ? simEpoch.result.plans : [];
+    for (const plan of routePlans) {
+      if (!plan.route.length) continue;
+      L.polyline(plan.route.map((w) => [w.lat, w.lon]), {
+        color: color(plan.drone_id), weight: view === "sim" ? 3 : 4, opacity: view === "sim" ? 0.35 : 0.85, ...noBubble,
+      }).bindTooltip(`${plan.drone_id}: ${Math.round(plan.route_m)} m at ${plan.altitude_m} m altitude`).addTo(layer);
+    }
+    // Radio links in use at time t
+    if (simFrame) {
+      const at = Object.fromEntries(simFrame.drones.map((d) => [d.id, d]));
+      for (const [a, b] of simFrame.links) {
+        if (!at[a] || !at[b]) continue;
+        L.polyline([[at[a].lat, at[a].lon], [at[b].lat, at[b].lon]], { color: "#7c3aed", weight: 1.5, dashArray: "2 5", opacity: 0.8, interactive: false }).addTo(layer);
       }
     }
 
@@ -492,7 +509,10 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
 
     // Points
     let statuses = null, owners = null;
-    if (result && (view === "plan" || view === "fly")) statuses = cbbaPointStatuses(last.scenario, result);
+    if (result && view === "plan") statuses = cbbaPointStatuses(last.scenario, result);
+    const inspectors = view === "sim" && sim.data ? cbbaInspectorsUpTo(sim.data.events, sim.t) : null;
+    const plannedOwner = {};
+    if (simEpoch) for (const pl of simEpoch.result.plans) for (const pid of pl.path) plannedOwner[pid] = pl.drone_id;
     if (step) owners = cbbaClaimOwners(step.claims);
     state.points.forEach((p, i) => {
       let fill = "#ffffff", extra = "", tip = `<b>${esc(p.id)}</b>${p.sensor ? ` (needs ${esc(p.sensor)})` : ""}`;
@@ -514,10 +534,16 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
         fill = o.length === 0 ? "#ffffff" : o.length > 1 ? "#dc2626" : color(o[0]);
         tip += o.length ? `<br>Wanted by ${esc(o.join(", "))}` : "<br>Nobody has claimed it yet";
       }
-      if (view === "fly" && fly.inspected.has(p.id)) {
-        fill = color(fly.inspectedBy[p.id]);
-        extra = " cbba-point--done";
-        tip += "<br>✓ inspected";
+      if (inspectors) {
+        if (inspectors[p.id]) {
+          fill = color(inspectors[p.id]);
+          extra = " cbba-point--done";
+          tip += `<br>✓ inspected by ${esc(inspectors[p.id])}`;
+        } else if (plannedOwner[p.id]) {
+          fill = "#ffffff";
+          extra = " cbba-point--planned";
+          tip += `<br>to be inspected by ${esc(plannedOwner[p.id])}`;
+        }
       }
       const m = L.marker([p.lat, p.lon], { icon: pointIcon(p, fill, extra), draggable: editable, ...noBubble }).bindTooltip(tip);
       m.on("dragend", (e) => {
@@ -533,15 +559,16 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
     state.drones.forEach((d, i) => {
       let at = { lat: d.lat, lon: d.lon };
       let failed = false;
-      if (view === "fly" && fly.timelines[d.id]) at = cbbaPositionAt(fly.timelines[d.id], fly.t) || at;
-      if (view === "fly" && fly.failed && fly.failed[d.id]) {
-        at = fly.failed[d.id];
-        failed = true;
-      }
-      const grey = d.offline || failed;
-      const tip = `${esc(d.id)}${d.offline ? " (OFFLINE)" : ""}${failed ? " (FAILED)" : ""}: ${esc(d.caps.join(" + ") || "no sensors")}, ` +
+      let tip = `${esc(d.id)}${d.offline ? " (OFFLINE)" : ""}: ${esc(d.caps.join(" + ") || "no sensors")}, ` +
         `battery ${Math.round(d.battery)}%${d.radioBroken ? ", radio broken" : ""}`;
-      const m = L.marker([at.lat, at.lon], { icon: droneIcon(d.id, { grey, failed }), draggable: editable, ...noBubble }).bindTooltip(tip);
+      const fd = simFrame && simFrame.drones.find((x) => x.id === d.id);
+      if (fd) {
+        at = { lat: fd.lat, lon: fd.lon };
+        failed = fd.status === "lost";
+        tip = `${esc(d.id)}: ${esc(CBBA_STATUS_TEXT[fd.status] || fd.status)}, battery ${Math.round(fd.battery)}%, planning round ${fd.epoch}`;
+      }
+      const grey = d.offline || failed || (fd && fd.status === "offline");
+      const m = L.marker([at.lat, at.lon], { icon: droneIcon(d.id, { grey, failed, nolink: fd && fd.status === "lost-link" }), draggable: editable, ...noBubble }).bindTooltip(tip);
       m.on("dragend", (e) => {
         const ll = e.target.getLatLng();
         state.drones[i].lat = ll.lat;
@@ -673,7 +700,7 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
 
   async function runPlan(meta = {}) {
     if (clickMode) setClickMode(clickMode);
-    stopFlight();
+    stopSim();
     const problems = cbbaCheckState(state);
     if (problems.length) {
       $("cbba-output").innerHTML = '<ul class="cbba-list cbba-issues">' + problems.map((p) => `<li>${esc(p)}</li>`).join("") + "</ul>";
@@ -689,9 +716,6 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
     steps = cbbaReplaySteps(last.trace || []);
     stepIdx = 0;
     view = "plan";
-    fly.inspected = new Set();
-    fly.log = [];
-    fly.failed = {};
     renderAll();
     fitAll();
   }
@@ -770,7 +794,7 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
 
   function startReplay() {
     if (!steps.length) return;
-    stopFlight();
+    stopSim();
     if (view !== "replay") {
       view = "replay";
       stepIdx = 0;
@@ -790,165 +814,147 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
     renderAll();
   }
 
-  // ---- simulated flight -------------------------------------------------------
-  function buildTimelines() {
-    const pointsById = Object.fromEntries(last.scenario.points.map((p) => [p.point_id, p]));
-    const speed = last.scenario.constraints.cruise_speed_ms;
-    fly.timelines = {};
-    for (const plan of last.result.plans) fly.timelines[plan.drone_id] = cbbaTimeline(plan, pointsById, speed);
-    // After a re-plan, a drone with nothing left to inspect still flies home.
-    for (const d of last.scenario.drones) {
-      const tl = fly.timelines[d.drone_id];
-      if (d.health === "OFFLINE" || !d.home || (tl && tl.legs.length)) continue;
-      const back = cbbaDistanceM(d.start, d.home) / speed;
-      if (back > 0) fly.timelines[d.drone_id] = { legs: [{ from: d.start, to: d.home, t0: 0, t1: back, point: null }], end: back };
+  // ---- live agents (simulated flight) -------------------------------------------
+  const FAILURE_TEXT = { drone_lost: "is lost (crash)", radio_cut: "radio breaks", radio_restored: "radio works again", battery_drop: "battery drops to" };
+
+  function simConfig() {
+    return {
+      message_loss: Number($("cbba-sim-loss").value),
+      message_delay_ticks: Number($("cbba-sim-delay").value),
+      heartbeat_timeout_s: Math.max(2, Number($("cbba-sim-timeout").value) || 5),
+    };
+  }
+
+  async function runSim(keepTime = false) {
+    if (clickMode) setClickMode(clickMode);
+    const problems = cbbaCheckState(state);
+    if (problems.length) {
+      $("cbba-sim-status").textContent = problems.join(" ");
+      return;
     }
-  }
-  const flightEnd = () => Math.max(0, ...Object.values(fly.timelines).map((tl) => tl.end));
-
-  function logFlight(text) {
-    fly.log.push(`t=${Math.round(fly.offset + fly.t)} s  ${text}`);
-  }
-
-  function startFlight() {
-    if (!last || !last.result.dispatch_allowed) return;
-    if (view !== "fly") {
-      view = "fly";
-      fly.t = 0;
-      fly.offset = 0;
-      fly.inspected = new Set();
-      fly.inspectedBy = {};
-      fly.failed = {};
-      fly.log = [];
-      buildTimelines();
-      logFlight("All drones take off (simulated).");
-    }
-    fly.running = true;
-    fly.lastTs = null;
-    fly.raf = requestAnimationFrame(tick);
-    renderAll();
-  }
-  function stopFlight() {
-    fly.running = false;
-    if (fly.raf) cancelAnimationFrame(fly.raf);
-    fly.raf = null;
-  }
-
-  function tick(ts) {
-    if (!fly.running) return;
-    if (fly.lastTs != null) fly.t += ((ts - fly.lastTs) / 1000) * fly.speed;
-    fly.lastTs = ts;
-    for (const plan of last.result.plans) {
-      plan.path.forEach((pid, k) => {
-        if (!fly.inspected.has(pid) && !(fly.failed && fly.failed[plan.drone_id]) && fly.t >= plan.arrival_s[k]) {
-          fly.inspected.add(pid);
-          fly.inspectedBy[pid] = plan.drone_id;
-          logFlight(`${plan.drone_id} inspected ${pid}.`);
-        }
+    stopSim();
+    const t = keepTime ? sim.t : 0;
+    $("cbba-sim-status").textContent = "The drones are flying the mission (simulation running on the server)…";
+    try {
+      const resp = await fetch(`${CBBA_BASE}/sim/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scenario: cbbaBuildScenario(state), config: simConfig(), events: sim.failures }),
       });
+      const body = await resp.json();
+      if (!resp.ok) throw new Error(JSON.stringify(body.detail || resp.status));
+      sim.data = body;
+    } catch (err) {
+      $("cbba-sim-status").textContent = serverDown(err);
+      return;
     }
-    if (fly.t >= flightEnd()) {
-      fly.t = flightEnd();
-      fly.running = false;
-      const total = state.points.length;
-      logFlight(`All drones are back home. ${fly.inspected.size} of ${total} place(s) inspected.`);
+    view = "sim";
+    sim.t = t;
+    const end = sim.data.frames[sim.data.frames.length - 1].t;
+    $("cbba-sim-time").max = String(end);
+    renderAll();
+    if (!keepTime) fitAll();
+    playSim();
+  }
+
+  function playSim() {
+    if (!sim.data) return;
+    if (sim.t >= sim.data.frames[sim.data.frames.length - 1].t) sim.t = 0;
+    sim.running = true;
+    sim.lastTs = null;
+    sim.raf = requestAnimationFrame(simTick);
+    renderSim();
+  }
+  function stopSim() {
+    sim.running = false;
+    if (sim.raf) cancelAnimationFrame(sim.raf);
+    sim.raf = null;
+  }
+  function simTick(ts) {
+    if (!sim.running) return;
+    if (sim.lastTs != null) sim.t += ((ts - sim.lastTs) / 1000) * sim.speed;
+    sim.lastTs = ts;
+    const end = sim.data.frames[sim.data.frames.length - 1].t;
+    if (sim.t >= end) {
+      sim.t = end;
+      sim.running = false;
     }
     renderMap();
-    renderFlight();
-    if (fly.running) fly.raf = requestAnimationFrame(tick);
+    renderSim();
+    if (sim.running) sim.raf = requestAnimationFrame(simTick);
   }
 
-  async function failDrone() {
+  async function failNow() {
     const who = $("cbba-fail-select").value;
-    if (!who || view !== "fly") return;
-    stopFlight();
-    const T = fly.t;
-    const drain = last.scenario.constraints.battery_drain_pct_per_min;
-    const pos = {};
-    for (const d of state.drones) pos[d.id] = (fly.timelines[d.id] && cbbaPositionAt(fly.timelines[d.id], T)) || { lat: d.lat, lon: d.lon };
-    fly.failed = { ...(fly.failed || {}), [who]: pos[who] };
-    const lost = (last.result.plans.find((p) => p.drone_id === who) || { path: [] }).path.filter((p) => !fly.inspected.has(p));
-    logFlight(`${who} FAILED. Places it had not reached yet: ${lost.length ? lost.join(", ") : "none"}.`);
-    logFlight("The other drones re-plan with CBBA from where they are now (deterministic code, no AI).");
-    renderFlight();
-
-    // New mission: everyone starts where they are now, must still get home,
-    // with less battery; failed drones are offline; inspected places are done.
-    const scenario = cbbaBuildScenario(state);
-    const used = (drain * (fly.offset + T)) / 60; // battery used since take-off
-    scenario.drones = scenario.drones.map((d) => {
-      const isFailed = !!fly.failed[d.drone_id];
-      return {
-        ...d,
-        start: { lat: pos[d.drone_id].lat, lon: pos[d.drone_id].lon, alt_m: 0 },
-        home: d.home || { lat: d.start.lat, lon: d.start.lon, alt_m: 0 },
-        battery_pct: Math.max(0, d.battery_pct - (isFailed ? 0 : used)),
-        health: isFailed || d.health === "OFFLINE" ? "OFFLINE" : "OK",
-      };
-    });
-    scenario.points = scenario.points.filter((p) => !fly.inspected.has(p.point_id));
-    if (!scenario.points.length) {
-      logFlight("Nothing left to inspect.");
-      renderFlight();
-      return;
-    }
-    let resp;
-    try {
-      resp = await postPlan(scenario, { source: "failure-replan", changes: [`${who} failed at t=${Math.round(fly.offset + T)} s`] });
-    } catch (err) {
-      logFlight(`Re-plan failed: ${err}`);
-      renderFlight();
-      return;
-    }
-    const moved = [];
-    for (const plan of resp.result.plans) for (const pid of plan.path) if (lost.includes(pid)) moved.push(`${pid} → ${plan.drone_id}`);
-    logFlight(`New plan: ${moved.length ? moved.join(", ") : "nobody could take the lost places"}. Safety gate: ${resp.result.dispatch_allowed ? "PASSED" : "BLOCKED"}.`);
-    if (!resp.result.dispatch_allowed) {
-      logFlight("The new plan is blocked, so the simulation stops here. (A real system would hold or return the drones home.)");
-      renderFlight();
-      return;
-    }
-    // Continue flying the new plan; keep the original setup for the map.
-    fly.offset += T;
-    fly.t = 0;
-    last = { ...resp, scenario: { ...resp.scenario, points: last.scenario.points } };
-    buildTimelines();
-    fly.running = true;
-    fly.lastTs = null;
-    fly.raf = requestAnimationFrame(tick);
+    if (!who || !sim.data) return;
+    sim.failures = [...sim.failures, { at_s: Math.round(sim.t), kind: "drone_lost", drone_id: who }];
+    renderFailures();
+    // Same seed: everything up to now replays identically, then diverges.
+    await runSim(true);
   }
 
-  function renderFlight() {
-    const ok = last && last.result.dispatch_allowed;
-    $("btn-cbba-fly").disabled = !ok;
-    $("btn-cbba-fly").textContent = view === "fly" && fly.running ? "Pause" : view === "fly" ? "Continue" : "Fly (simulated)";
-    $("btn-cbba-fail").disabled = !(view === "fly");
-    const sel = $("cbba-fail-select");
-    const alive = state.drones.filter((d) => !d.offline && !(fly.failed && fly.failed[d.id])).map((d) => d.id);
-    if (sel.dataset.list !== alive.join(",")) {
-      sel.innerHTML = alive.map((id) => `<option value="${esc(id)}">${esc(id)}</option>`).join("");
-      sel.dataset.list = alive.join(",");
-    }
-    const status = $("cbba-fly-status");
-    if (!last) status.textContent = "Plan the mission first.";
-    else if (!ok) status.textContent = "Only a plan that PASSED the safety gate can be flown.";
-    else if (view !== "fly") status.textContent = "Ready. The drones will follow their planned routes (simulation).";
-    else status.textContent = `Mission time ${Math.round(fly.offset + fly.t)} s · ${fly.inspected.size} of ${state.points.length} place(s) inspected`;
-    $("cbba-fly-log").innerHTML = fly.log.slice().reverse().map((l) => `<li>${esc(l)}</li>`).join("");
+  function addFailure() {
+    const kind = $("cbba-fail-kind").value;
+    const ev = { at_s: Math.max(0, Number($("cbba-fail-at").value) || 0), kind, drone_id: $("cbba-fail-drone").value };
+    if (!ev.drone_id) return;
+    if (kind === "battery_drop") ev.battery_pct = Math.min(100, Math.max(0, Number($("cbba-fail-battery").value) || 20));
+    sim.failures = [...sim.failures, ev].sort((a, b) => a.at_s - b.at_s);
+    renderFailures();
   }
 
-  function toggleFly() {
-    if (view === "fly" && fly.running) {
-      stopFlight();
-      renderFlight();
-    } else {
-      startFlight();
+  function renderFailures() {
+    const ids = state.drones.map((d) => d.id);
+    for (const id of ["cbba-fail-drone", "cbba-fail-select"]) {
+      const sel = $(id);
+      if (sel.dataset.list !== ids.join(",")) {
+        sel.innerHTML = ids.map((x) => `<option value="${esc(x)}">${esc(x)}</option>`).join("");
+        sel.dataset.list = ids.join(",");
+      }
+    }
+    $("cbba-fail-battery-wrap").hidden = $("cbba-fail-kind").value !== "battery_drop";
+    sim.failures = sim.failures.filter((f) => ids.includes(f.drone_id));
+    $("cbba-fail-list").innerHTML = sim.failures.length
+      ? sim.failures.map((f, i) => `<li>at ${f.at_s} s: <b>${esc(f.drone_id)}</b> ${esc(FAILURE_TEXT[f.kind])}${f.kind === "battery_drop" ? ` ${f.battery_pct}%` : ""}
+          <button class="cbba-x" data-i="${i}" title="Remove">×</button></li>`).join("")
+      : '<li class="cbba-empty">Nothing goes wrong (yet).</li>';
+  }
+
+  function renderSim() {
+    const has = !!sim.data;
+    $("btn-cbba-sim-play").disabled = !has;
+    $("btn-cbba-sim-play").textContent = sim.running ? "Pause" : "Play";
+    $("btn-cbba-fail").disabled = !has;
+    const status = $("cbba-sim-status");
+    if (!has) {
+      status.textContent = "Set the radio and what goes wrong, then press Run. Each drone runs its own loop: it sends heartbeats, bids, notices silent teammates and re-plans.";
+      $("cbba-fly-log").innerHTML = "";
+      return;
+    }
+    const d = sim.data;
+    const end = d.frames[d.frames.length - 1].t;
+    const frame = cbbaFrameAt(d.frames, sim.t);
+    const done = Object.keys(cbbaInspectorsUpTo(d.events, sim.t)).length;
+    $("cbba-sim-time").value = String(sim.t);
+    status.innerHTML =
+      `<b>Mission time ${Math.round(sim.t)} s</b> of ${Math.round(end)} s · ${done} place(s) inspected · ` +
+      frame.drones.map((x) => `<span class="cbba-dot" style="background:${color(x.id)}"></span>${esc(x.id)}: ${esc(CBBA_STATUS_TEXT[x.status] || x.status)} (${Math.round(x.battery)}%)`).join(" · ") +
+      `<div class="cbba-label">${esc(d.label)}</div>`;
+    const shown = d.events.filter((e) => e.t <= sim.t);
+    $("cbba-fly-log").innerHTML = shown.slice().reverse().map((e) => `<li class="cbba-ev cbba-ev--${esc(e.kind)}">t=${e.t} s · ${esc(e.text)}</li>`).join("");
+    if (sim.t >= end && !sim.running) {
+      const s = d.summary;
+      const notDone = Object.entries(s.not_inspected).map(([p, why]) => `${cbbaShortName(p)} (${why})`).join("; ");
+      $("cbba-fly-log").insertAdjacentHTML("afterbegin",
+        `<li class="cbba-summary"><b>Finished:</b> ${s.inspected_count} of ${s.places} place(s) inspected in ${s.duration_s} s` +
+        `${s.double_inspected.length ? `; done twice: ${esc(s.double_inspected.join(", "))}` : ""}` +
+        `${notDone ? `; not inspected: ${esc(notDone)}` : ""}. Planning rounds: ${s.planning_rounds}. ` +
+        `Messages: ${s.messages_sent} sent, ${s.messages_lost} lost. False alarms: ${s.false_alarms}.</li>`);
     }
   }
 
   // ---- example & reset --------------------------------------------------------
   async function loadExample() {
-    stopFlight();
+    stopSim();
     try {
       const resp = await fetch(`${CBBA_BASE}/cbba/sample`);
       const body = await resp.json();
@@ -967,6 +973,33 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
       $("cbba-output").textContent = "Example loaded (3 drones, 11 places near Stanford). Click Run CBBA.";
     } catch (err) {
       $("cbba-output").textContent = serverDown(err);
+    }
+  }
+
+  // READ-ONLY: copy the running fleet's positions/batteries (services/api,
+  // via the fleet-agent server) as the drones' start points. Nothing is
+  // sent to any vehicle.
+  async function importLive() {
+    stopSim();
+    try {
+      const resp = await fetch(`${CBBA_BASE}/fleet/live`);
+      const body = await resp.json();
+      if (!resp.ok) throw new Error(body.detail || resp.status);
+      if (!body.drones.length) {
+        $("cbba-output").textContent = "No running drone is reporting a position right now. " + (body.notes || []).join("; ");
+        return;
+      }
+      const old = Object.fromEntries(state.drones.map((d) => [d.id, d]));
+      state.drones = body.drones.map((d) => ({
+        id: d.id, lat: d.lat, lon: d.lon, battery: Math.round(d.battery),
+        caps: (old[d.id] && old[d.id].caps) || ["camera"], offline: false, radioBroken: false,
+      }));
+      if (body.fence && !state.fence) state.fence = body.fence.map((p) => ({ lat: p.lat, lon: p.lon }));
+      edited();
+      fitAll();
+      $("cbba-output").textContent = `Using ${body.drones.length} running drone(s) from ${body.api}.` + (body.notes && body.notes.length ? " " + body.notes.join("; ") + "." : "");
+    } catch (err) {
+      $("cbba-output").textContent = `Could not read your running drones: ${err}. Start the fleet (scripts\\run_fleet.ps1) and the CBBA server first.`;
     }
   }
 
@@ -1056,7 +1089,8 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
     renderMap();
     if (last) renderResult();
     renderReplay();
-    renderFlight();
+    renderFailures();
+    renderSim();
     $("btn-cbba-step-show").textContent = view === "replay" ? "Back to plan" : "Start replay";
   }
 
@@ -1069,6 +1103,7 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
   });
   $("btn-cbba-example").addEventListener("click", loadExample);
   $("btn-cbba-clear-all").addEventListener("click", clearAll);
+  $("btn-cbba-import-live").addEventListener("click", importLive);
   $("cbba-radio-mode").addEventListener("change", (e) => {
     state.radioMode = e.target.value;
     edited();
@@ -1085,9 +1120,23 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
   $("btn-cbba-step-show").addEventListener("click", startReplay);
   $("btn-cbba-step-prev").addEventListener("click", () => stepBy(-1));
   $("btn-cbba-step-next").addEventListener("click", () => stepBy(1));
-  $("btn-cbba-fly").addEventListener("click", toggleFly);
-  $("cbba-fly-speed").addEventListener("change", (e) => (fly.speed = Number(e.target.value)));
-  $("btn-cbba-fail").addEventListener("click", failDrone);
+  $("btn-cbba-fly").addEventListener("click", () => runSim(false));
+  $("btn-cbba-sim-play").addEventListener("click", () => (sim.running ? (stopSim(), renderSim()) : playSim()));
+  $("cbba-fly-speed").addEventListener("change", (e) => (sim.speed = Number(e.target.value)));
+  $("cbba-sim-time").addEventListener("input", (e) => {
+    stopSim();
+    sim.t = Number(e.target.value);
+    renderMap();
+    renderSim();
+  });
+  $("btn-cbba-fail").addEventListener("click", failNow);
+  $("btn-cbba-fail-add").addEventListener("click", addFailure);
+  $("cbba-fail-kind").addEventListener("change", renderFailures);
+  $("cbba-fail-list").addEventListener("click", (e) => {
+    if (e.target.dataset.i === undefined) return;
+    sim.failures.splice(Number(e.target.dataset.i), 1);
+    renderFailures();
+  });
   $("btn-cbba-understand").addEventListener("click", understand);
   $("btn-cbba-apply").addEventListener("click", applyProposal);
   $("cbba-instruct-text").addEventListener("keydown", (e) => {

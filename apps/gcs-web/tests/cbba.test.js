@@ -133,18 +133,24 @@ test("replay has two steps per round: thinking alone, then talking", () => {
   assert.equal(m.cbbaEventText(steps[0].events[0]), "a bids 90 for p1");
 });
 
-test("flight timeline: fly to each place, hover, fly home; position in between", () => {
-  const plan = {
-    path: ["p1"], arrival_s: [10],
-    route: [{ lat: 0, lon: 0 }, { lat: 0.001, lon: 0 }, { lat: 0, lon: 0 }],
-  };
-  const tl = m.cbbaTimeline(plan, { p1: { inspect_duration_s: 5 } }, 8);
-  assert.equal(tl.legs.length, 2);
-  assert.equal(tl.legs[1].t0, 15); // arrives at 10 s, hovers 5 s
-  assert.ok(Math.abs(tl.end - (15 + 111.2 / 8)) < 0.2);
-  assert.deepEqual(m.cbbaPositionAt(tl, 5), { lat: 0.0005, lon: 0 });
-  assert.deepEqual(m.cbbaPositionAt(tl, 12), { lat: 0.001, lon: 0 }); // hovering at p1
-  assert.deepEqual(m.cbbaPositionAt(tl, 1e6), { lat: 0, lon: 0 }); // home
+test("playback: frame at a time, inspectors so far, plan in force", () => {
+  const frames = [{ t: 0 }, { t: 1 }, { t: 2 }, { t: 3 }];
+  assert.equal(m.cbbaFrameAt(frames, -5).t, 0);
+  assert.equal(m.cbbaFrameAt(frames, 1.7).t, 1);
+  assert.equal(m.cbbaFrameAt(frames, 99).t, 3);
+  assert.equal(m.cbbaFrameAt([], 1), null);
+  const events = [
+    { t: 10, kind: "inspect", drone: "a", text: "a inspected P01-roof." },
+    { t: 20, kind: "detect", drone: "b", text: "b has had no news of a" },
+    { t: 30, kind: "inspect", drone: "b", text: "b inspected P01-roof (already done by a - double work)." },
+    { t: 40, kind: "inspect", drone: "b", text: "b inspected P02." },
+  ];
+  assert.deepEqual(m.cbbaInspectorsUpTo(events, 35), { "P01-roof": "a" });
+  assert.deepEqual(m.cbbaInspectorsUpTo(events, 100), { "P01-roof": "a", P02: "b" });
+  const epochs = [{ epoch: 1, started_t: 0 }, { epoch: 2, started_t: 45 }];
+  assert.equal(m.cbbaEpochAt(epochs, 44).epoch, 1);
+  assert.equal(m.cbbaEpochAt(epochs, 45).epoch, 2);
+  assert.equal(m.CBBA_STATUS_TEXT["lost-link"], "no radio contact");
 });
 
 test("an instruction's checked scenario updates only allowed fields in the editor", () => {
