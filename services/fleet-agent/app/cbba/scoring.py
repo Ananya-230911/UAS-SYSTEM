@@ -32,7 +32,7 @@ BID_EPS = 1e-9
 class PathEval:
     score: float
     arrival_s: list[float]
-    route_m: float  # start -> points -> start
+    route_m: float  # start -> points -> home
 
 
 def _dist(a_lat: float, a_lon: float, b_lat: float, b_lon: float) -> float:
@@ -63,13 +63,27 @@ def evaluate_path(
         score += p.value * config.discount_per_s ** t
         t += p.inspect_duration_s
         lat, lon = p.lat, p.lon
-    leg_total += _dist(lat, lon, drone.start.lat, drone.start.lon)
+    home = drone.home_point()
+    leg_total += _dist(lat, lon, home.lat, home.lon)
 
-    if path:
-        route = route_waypoints(path, altitude_m)
-        if check_endurance(route, drone.start, constraints, drone.battery_pct, drone.drone_id):
-            return None
+    if path and endurance_issues(drone, route_waypoints(path, altitude_m), constraints):
+        return None
     return PathEval(score=score, arrival_s=arrivals, route_m=leg_total)
+
+
+def endurance_issues(drone: DroneSpec, route: list[Waypoint], constraints: SafetyConstraints):
+    """app/safety/validator.py::check_endurance for this drone's route.
+    Normally the drone starts at home: checked exactly as the validator
+    does. When re-planning mid-mission (start != home) the validator's
+    home -> route -> home loop is given [current position] + route, so it
+    also counts the leg from home to where the drone is now -- distance
+    already flown. That over-estimates the battery needed: conservative,
+    never optimistic. Used by both bidding and the safety gate."""
+    home = drone.home_point()
+    if home is drone.start or (home.lat, home.lon) == (drone.start.lat, drone.start.lon):
+        return check_endurance(route, home, constraints, drone.battery_pct, drone.drone_id)
+    here = Waypoint(lat=drone.start.lat, lon=drone.start.lon, alt_m=route[0].alt_m if route else 0.0)
+    return check_endurance([here] + route, home, constraints, drone.battery_pct, drone.drone_id)
 
 
 def route_waypoints(path: list[InspectionPoint], altitude_m: float) -> list[Waypoint]:

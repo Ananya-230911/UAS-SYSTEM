@@ -49,6 +49,8 @@ def _split_inputs(scenario: Scenario):
             excluded_drones.append(ExcludedItem(item_id=d.drone_id, reason="offline"))
         elif not _inside(d.start.lat, d.start.lon, scenario):
             excluded_drones.append(ExcludedItem(item_id=d.drone_id, reason="starts outside the geofence"))
+        elif not _inside(d.home_point().lat, d.home_point().lon, scenario):
+            excluded_drones.append(ExcludedItem(item_id=d.drone_id, reason="its home is outside the geofence"))
         else:
             drones.append(d)
 
@@ -73,8 +75,9 @@ def _live_links(scenario: Scenario, drones: list[DroneSpec]) -> CommsSpec:
 def _drone_plan(drone: DroneSpec, path: list[str], bundle: list[str], by_id, scenario: Scenario, alt: float) -> DronePlan:
     pts = [by_id[pid] for pid in path]
     ev = evaluate_path(drone, pts, scenario.constraints, scenario.config, alt)
-    home = Waypoint(lat=drone.start.lat, lon=drone.start.lon, alt_m=alt)
-    route = [home] + [Waypoint(lat=p.lat, lon=p.lon, alt_m=alt) for p in pts] + [home] if pts else []
+    here = Waypoint(lat=drone.start.lat, lon=drone.start.lon, alt_m=alt)
+    home = Waypoint(lat=drone.home_point().lat, lon=drone.home_point().lon, alt_m=alt)
+    route = [here] + [Waypoint(lat=p.lat, lon=p.lon, alt_m=alt) for p in pts] + [home] if pts else []
     return DronePlan(
         drone_id=drone.drone_id,
         altitude_m=alt,
@@ -100,7 +103,9 @@ def _unassigned_reason(point: InspectionPoint, drones: list[DroneSpec], scenario
     return "every capable drone was full (bundle limit) or adding it would break a deadline or the battery reserve"
 
 
-def allocate(scenario: Scenario, method: str = "CBBA") -> CbbaResult:
+def allocate(scenario: Scenario, method: str = "CBBA", trace: list | None = None) -> CbbaResult:
+    """trace: pass an empty list to have it filled with one TraceRound per
+    CBBA round (how the drones decided -- for display). Ignored for SGA."""
     if method not in ("CBBA", "SGA"):
         raise ValueError("method must be 'CBBA' or 'SGA'")
     drones, excluded_drones, points, excluded_points = _split_inputs(scenario)
@@ -109,7 +114,7 @@ def allocate(scenario: Scenario, method: str = "CBBA") -> CbbaResult:
 
     if method == "CBBA" and drones:
         graph = CommsGraph.from_spec(_live_links(scenario, drones), drones)
-        run = run_cbba(drones, points, scenario.constraints, scenario.config, graph, altitudes)
+        run = run_cbba(drones, points, scenario.constraints, scenario.config, graph, altitudes, trace=trace)
         paths = {aid: (a.path, a.bundle) for aid, a in run.agents.items()}
         converged, agreement, label = run.converged, run.agreement, SIM_LABEL
         groups = graph.components()

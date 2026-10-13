@@ -652,6 +652,8 @@ main {
   margin: 0.45rem 0;
 }
 
+.cbba-field[hidden] { display: none; }
+
 .cbba-field select {
   padding: 0.3rem 0.4rem;
   border: 1px solid var(--border);
@@ -661,24 +663,72 @@ main {
   max-width: 13rem;
 }
 
-.cbba-checks {
-  display: flex;
-  gap: 0.6rem;
-}
-
-.cbba-checks label {
-  display: flex;
-  align-items: center;
-  gap: 0.2rem;
-  color: var(--ink);
-}
-
-#btn-cbba-run {
+#btn-cbba-run,
+#btn-cbba-fly {
   background: #7c3aed;
   border-color: #7c3aed;
   color: white;
 }
-#btn-cbba-run:hover { background: #6d28d9; border-color: #6d28d9; }
+#btn-cbba-run:hover,
+#btn-cbba-fly:hover { background: #6d28d9; border-color: #6d28d9; }
+
+#panel button.cbba-active {
+  background: #ede9fe;
+  border-color: #7c3aed;
+  color: #5b21b6;
+}
+
+.cbba-click-hint { font-size: 0.78rem; color: #6d28d9; margin: 0.3rem 0; min-height: 0; }
+.cbba-click-hint:empty { display: none; }
+.cbba-empty { font-size: 0.78rem; color: var(--muted-light); margin: 0.2rem 0; }
+
+.cbba-row { border-bottom: 1px solid #f1f5f9; padding: 0.3rem 0; }
+.cbba-row-line { display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; font-size: 0.78rem; }
+.cbba-row-sub { margin-top: 0.2rem; padding-left: 1.05rem; }
+.cbba-row input, .cbba-row select, .cbba-field input {
+  padding: 0.2rem 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-size: 0.78rem;
+  color: var(--ink);
+}
+.cbba-name { width: 6.2rem; font-weight: 600; }
+.cbba-mini { color: var(--muted); display: flex; align-items: center; gap: 0.2rem; }
+.cbba-mini input { width: 3.4rem; }
+.cbba-deadline { width: 6.3rem; }
+.cbba-chip { display: inline-flex; align-items: center; gap: 0.15rem; color: var(--ink); }
+.cbba-chip--warn { color: #b45309; }
+.cbba-x {
+  margin-left: auto;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 1.05rem;
+  cursor: pointer;
+  line-height: 1;
+}
+.cbba-x:hover { color: var(--red); }
+.cbba-link {
+  border: none;
+  background: none;
+  color: var(--blue);
+  cursor: pointer;
+  font-size: 0.78rem;
+  padding: 0;
+  text-decoration: underline;
+}
+.cbba-step-count { font-size: 0.7rem; font-weight: 700; color: #6d28d9; text-transform: uppercase; letter-spacing: 0.05em; }
+.cbba-log { max-height: 14rem; overflow-y: auto; }
+.cbba-log li { font-size: 0.76rem; font-variant-numeric: tabular-nums; }
+.cbba-point--done { outline: 3px solid #16a34a; outline-offset: 1px; }
+.cbba-point--done::after { content: " ✓"; }
+.cbba-drone--failed span { background: #fee2e2; color: var(--red); border-color: var(--red); }
+#cbba-fail-select, #cbba-fly-speed {
+  padding: 0.3rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.8rem;
+}
 
 #cbba-output { white-space: pre-line; }
 #cbba-output ul, #cbba-output p, #cbba-output div { white-space: normal; }

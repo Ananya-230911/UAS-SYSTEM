@@ -18,9 +18,9 @@ from __future__ import annotations
 from app.cbba.models import DroneHealth, DronePlan, DroneSpec, InspectionPoint
 from app.core.models import Geofence, SafetyConstraints, ValidationIssue, ValidationResult, Waypoint
 from app.safety.geofence import horizontal_distance_m
+from app.cbba.scoring import endurance_issues
 from app.safety.validator import (
     check_altitude,
-    check_endurance,
     check_launch_point,
     check_route_against_fence,
     check_separation,
@@ -82,14 +82,16 @@ def check_allocation(
             known_path.append(point)
 
         route = [Waypoint(lat=p.lat, lon=p.lon, alt_m=plan.altitude_m) for p in known_path]
-        home = Waypoint(lat=drone.start.lat, lon=drone.start.lon, alt_m=plan.altitude_m)
+        here = Waypoint(lat=drone.start.lat, lon=drone.start.lon, alt_m=plan.altitude_m)
+        home_pt = drone.home_point()
+        home = Waypoint(lat=home_pt.lat, lon=home_pt.lon, alt_m=plan.altitude_m)
         routes[did] = route
 
         issues += check_altitude(route, constraints, did)
-        # Include the legs from home and back: they must stay inside too.
-        issues += check_route_against_fence([home] + route + [home], geofence, did)
-        issues += check_launch_point(drone.start, geofence, did)
-        issues += check_endurance(route, drone.start, constraints, drone.battery_pct, did)
+        # Include the legs from where it is and back home: they must stay inside too.
+        issues += check_route_against_fence([here] + route + [home], geofence, did)
+        issues += check_launch_point(home_pt, geofence, did)
+        issues += endurance_issues(drone, route, constraints)
         issues += _check_deadlines(drone, known_path, constraints)
 
     # Lock-step separation check (known limitation, see check_separation's

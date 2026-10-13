@@ -9,6 +9,7 @@ app/core/models.py rather than defining parallel ones.
 from __future__ import annotations
 
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -43,10 +44,17 @@ class DroneHealth(str, Enum):
 
 class DroneSpec(BaseModel):
     drone_id: str = Field(min_length=1)
+    # Where the drone is now. Before take-off this is its launch point;
+    # when re-planning mid-mission it is its current position.
     start: Waypoint
     battery_pct: float = Field(ge=0, le=100)
     capabilities: list[str] = Field(default_factory=list)
     health: DroneHealth = DroneHealth.OK
+    # Where it must return to. None = back to `start` (the usual case).
+    home: Waypoint | None = None
+
+    def home_point(self) -> Waypoint:
+        return self.home or self.start
 
 
 class CommsSpec(BaseModel):
@@ -143,3 +151,29 @@ class CbbaResult(BaseModel):
     safety: ValidationResult
     # The only flag later phases may act on: converged AND safety passed.
     dispatch_allowed: bool
+
+
+class TraceEvent(BaseModel):
+    """One thing that happened in a CBBA round, for showing how the drones
+    decided. kind="bid": a drone claimed a point. kind="dropped": a drone
+    gave a point up -- reason "outbid" (another drone bid more: winner and
+    winner_bid say who and how much), "after_lost" (it was planned after a
+    point the drone lost, so its bid no longer holds), or "reset"
+    (conflicting news; the drone will bid again)."""
+
+    kind: Literal["bid", "dropped"]
+    drone: str
+    point: str
+    bid: float | None = None
+    reason: Literal["outbid", "after_lost", "reset"] | None = None
+    winner: str | None = None
+    winner_bid: float | None = None
+
+
+class TraceRound(BaseModel):
+    round: int
+    links: list[tuple[str, str]]  # radio links working this round
+    messages: int  # messages delivered this round
+    wants: dict[str, list[str]]  # each drone's claims after its own bidding
+    claims: dict[str, list[str]]  # ...and after hearing its neighbours
+    events: list[TraceEvent]

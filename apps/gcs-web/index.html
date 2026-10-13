@@ -95,32 +95,81 @@
       <h3 class="panel-group-label">Multi-drone (simulation)</h3>
 
       <section class="section-cbba">
-        <h2>CBBA task allocation</h2>
+        <h2>1 · Mission setup</h2>
         <p class="hint">
-          Simulated drones share out inspection points among themselves
-          (CBBA), then a safety check approves or blocks the plan. Display
-          only -- nothing is sent to any vehicle. Needs the fleet-agent
-          server on port 8020 (see services/fleet-agent/README.md).
+          Put drones and places to inspect anywhere: search a city above
+          the map, then add them by clicking the map. Drag them to move.
+          Simulation only -- nothing is sent to any vehicle.
         </p>
-        <label class="cbba-field">Radio links
-          <select id="cbba-comms">
-            <option value="full">Everyone can talk</option>
-            <option value="line">Chain: sim-1 &harr; sim-2 &harr; sim-3</option>
-            <option value="split">sim-3 cut off</option>
+        <div class="button-row">
+          <button id="btn-cbba-add-drone">+ Drone</button>
+          <button id="btn-cbba-add-point">+ Place</button>
+          <button id="btn-cbba-draw-fence">Draw fence</button>
+        </div>
+        <p id="cbba-click-hint" class="cbba-click-hint"></p>
+        <div class="perception-heading">Drones</div>
+        <div id="cbba-drone-list"></div>
+        <div class="perception-heading">Places to inspect</div>
+        <div id="cbba-point-list"></div>
+        <div class="perception-heading">Radio &amp; fence</div>
+        <label class="cbba-field">Radio
+          <select id="cbba-radio-mode">
+            <option value="all">Everyone can talk</option>
+            <option value="range">Limited range</option>
           </select>
         </label>
-        <div class="cbba-field">Offline drones
-          <span class="cbba-checks">
-            <label><input type="checkbox" class="cbba-offline" value="sim-1" /> sim-1</label>
-            <label><input type="checkbox" class="cbba-offline" value="sim-2" /> sim-2</label>
-            <label><input type="checkbox" class="cbba-offline" value="sim-3" /> sim-3</label>
-          </span>
+        <label class="cbba-field" id="cbba-range-wrap" hidden>Range (metres)
+          <input type="number" id="cbba-range" min="1" step="10" />
+        </label>
+        <p class="cbba-line cbba-muted"><span id="cbba-fence-status"></span>
+          <button id="btn-cbba-auto-fence" class="cbba-link">use automatic</button></p>
+        <div class="button-row">
+          <button id="btn-cbba-example">Load Stanford example</button>
+          <button id="btn-cbba-clear-all">Clear all</button>
         </div>
+      </section>
+
+      <section class="section-cbba">
+        <h2>2 · Plan with CBBA</h2>
+        <p class="hint">
+          Each drone is an agent: it bids for places, talks to the drones it
+          can hear, and they share the work with no repeats. Then a safety
+          check (fixed rules, no AI) approves or blocks the plan. Needs the
+          fleet-agent server on port 8020.
+        </p>
         <div class="button-row">
           <button id="btn-cbba-run">Run CBBA</button>
-          <button id="btn-cbba-clear">Clear from map</button>
         </div>
         <div id="cbba-output" class="perception-panel">Not run yet.</div>
+      </section>
+
+      <section class="section-cbba">
+        <h2>3 · How the drones decided</h2>
+        <div class="button-row">
+          <button id="btn-cbba-step-prev">◀ Back</button>
+          <button id="btn-cbba-step-show">Start replay</button>
+          <button id="btn-cbba-step-next">Next ▶</button>
+        </div>
+        <div id="cbba-replay" class="perception-panel"></div>
+      </section>
+
+      <section class="section-cbba">
+        <h2>4 · Simulated flight</h2>
+        <div class="button-row">
+          <button id="btn-cbba-fly">Fly (simulated)</button>
+          <select id="cbba-fly-speed" aria-label="speed">
+            <option value="5">5× speed</option>
+            <option value="10" selected>10× speed</option>
+            <option value="25">25× speed</option>
+            <option value="50">50× speed</option>
+          </select>
+        </div>
+        <div class="button-row">
+          <select id="cbba-fail-select" aria-label="drone to fail"></select>
+          <button id="btn-cbba-fail">Make this drone fail</button>
+        </div>
+        <p id="cbba-fly-status" class="cbba-line cbba-muted"></p>
+        <ul id="cbba-fly-log" class="cbba-list cbba-log"></ul>
       </section>
 
       <h3 class="panel-group-label">Tools</h3>

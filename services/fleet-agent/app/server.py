@@ -38,13 +38,16 @@ def health() -> dict:
 
 
 def _with_reference(scenario: Scenario) -> dict:
-    result = allocate(scenario)
+    trace: list = []
+    result = allocate(scenario, trace=trace)
     reference = allocate(scenario, method="SGA")
     same = [(p.drone_id, p.path) for p in result.plans] == [(p.drone_id, p.path) for p in reference.plans]
     return {
         "scenario": scenario.model_dump(mode="json"),
         "result": result.model_dump(mode="json"),
         "reference": {"label": reference.label, "total_score": reference.total_score, "same_allocation": same},
+        # Round-by-round record of how the drones decided (display only).
+        "trace": [t.model_dump(mode="json") for t in trace],
     }
 
 
@@ -61,6 +64,13 @@ def cbba_sample(
         raise HTTPException(status_code=422, detail=f"unknown drone id(s): {', '.join(unknown)}")
     assert comms in COMMS
     return _with_reference(sample_scenario(comms, offline))
+
+
+@app.post("/cbba/plan")
+def cbba_plan(scenario: Scenario) -> dict:
+    """A scenario built by the operator in the GCS page (drones, inspection
+    points, fence, radio links). Same response shape as /cbba/sample."""
+    return _with_reference(scenario)
 
 
 @app.post("/cbba/allocate", response_model=CbbaResult)

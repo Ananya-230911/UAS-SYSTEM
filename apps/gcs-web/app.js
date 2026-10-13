@@ -87,6 +87,9 @@ let spawnPickMode = false;
 let spawnMarker = null;
 
 map.on("click", (e) => {
+  // The CBBA panel (cbba.js) is placing drones/points/fence corners:
+  // that click is its, not a mission waypoint.
+  if (window.cbbaPicking) return;
   if (spawnPickMode) {
     spawnPickMode = false;
     handleSpawnLocationPicked(e.latlng.lat, e.latlng.lng);

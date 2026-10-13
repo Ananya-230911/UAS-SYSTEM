@@ -55,11 +55,13 @@ $env:PYTHONPATH = "."
 powershell -ExecutionPolicy Bypass -File scripts\run_cbba.ps1      # server on :8020
 cd apps\gcs-web; ..\..\.venv\Scripts\python.exe -m http.server 8080  # if the GCS isn't already running
 ```
-Open `http://localhost:8080/`, scroll the right-hand panel to **CBBA task
-allocation**, pick the radio links / offline drones, and click **Run CBBA**.
-Works with or without simulated drones running. `app/server.py` is read-only:
-`GET /health`, `GET /cbba/sample?comms=full|line|split&offline=sim-2`,
-`POST /cbba/allocate` -- no command endpoints.
+Open `http://localhost:8080/` and scroll the right-hand panel to
+**Multi-drone (simulation)**: 1 set up the mission by clicking the map (any
+city), 2 **Run CBBA**, 3 replay how the drones decided, 4 fly it
+(simulated) and make a drone fail to watch them re-plan. Works with or
+without the flight simulators running. `app/server.py` is read-only:
+`GET /health`, `GET /cbba/sample`, `POST /cbba/plan` (with a round-by-round
+`trace`), `POST /cbba/allocate` -- no command endpoints.
 
 | File | What it does |
 | --- | --- |

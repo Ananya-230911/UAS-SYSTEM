@@ -256,3 +256,69 @@ server: the chain's links still named the removed drone.
 - No page errors.
 - Map tiles were not loaded in the sandbox, which has no internet
   access.
+
+## Mission editor, decision replay and simulated flight (operator request)
+The operator asked to choose the places to inspect themselves, anywhere
+in the world, and to *see* the agents communicate and decide.
+
+**GCS panel (`apps/gcs-web/cbba.js`)** now has four sections:
+
+1. **Mission setup.** Click the map to place drones and places (in any
+   city), and drag them to move.
+   - Each drone: name, battery, sensors (camera / thermal / lidar),
+     "offline", "radio broken".
+   - Each place: name, sensor needed, priority (low 50 / normal 100 /
+     high 150, i.e. the CBBA value), and an optional deadline.
+   - Radio: everyone can talk, or limited range in metres.
+   - Fence: drawn by the operator, or an automatic box around everything.
+   - Saved in the browser (localStorage).
+   - The Stanford example loads on first use.
+2. **Plan with CBBA.** `POST /cbba/plan`, followed by the existing safety
+   gate.
+3. **How the drones decided.** A replay with two steps per round:
+   - "thinking alone": the bids, with contested places in red;
+   - "talking": the radio links drawn, the message count, and every
+     give-up in plain English (outbid by whom and by how much, dropped
+     because it came after a lost place, or reset).
+4. **Simulated flight.** The drones move along the planned routes in the
+   browser, and places are ticked off as they are inspected.
+   - **Make this drone fail**: the remaining drones re-plan with CBBA
+     from where they are now, with the battery used so far deducted and
+     inspected places removed. They then continue flying the new plan.
+   - A blocked re-plan stops the simulation with the reason shown.
+
+**Server.**
+- `POST /cbba/plan` takes an operator-built `Scenario`.
+- `/cbba/sample` and `/cbba/plan` also return `trace`: one `TraceRound`
+  per round (links, messages, wants, claims, events). It is recorded by
+  the runner and capped at 60 rounds.
+- `DroneSpec.home` is optional; it is used when re-planning mid-mission
+  (start = current position, the drone must return home).
+- The battery check for a mid-mission re-plan uses the validator's
+  `check_endurance` with [current position] + route. That also counts the
+  home → here leg, which has already been flown. This is conservative
+  (it can refuse a feasible plan, never accept an infeasible one), and a
+  test documents it.
+
+**Bug found by the browser test, fixed.** `app.js` already has a global
+`droneIcon`. A function with the same name in `cbba.js` crashed the
+script, so the panel's browser code now runs in its own function scope.
+`app.js`'s map-click handler ignores clicks while the CBBA panel is
+placing things, so no stray mission waypoints are added.
+
+**Verified.**
+- Tests: fleet-agent 429; JS 20.
+- A scripted headless-Chromium run with unpkg.com blocked:
+  1. The Stanford example loaded and planned (PASSED).
+  2. The replay explained round 1.
+  3. In flight at 25× speed, sim-2 failed at t = 42 s. Its remaining
+     place P06 was re-planned to sim-1 (PASSED). All drones came home,
+     with 9 of 11 places inspected: P10 needs lidar, and P11 is outside
+     the fence.
+  4. A new mission with 2 drones and 5 places, built by clicking near
+     Chennai, planned and PASSED.
+  5. No stray waypoints were added, and there were no page errors.
+- **Not done here:** typed instructions to an AI assistant ("inspect the
+  water tank with thermal"). That is Phase D (Groq goal parsing plus the
+  intent gate). The LLM will only fill in the mission form; it never
+  computes the plan.

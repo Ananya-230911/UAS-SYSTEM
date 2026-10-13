@@ -52,3 +52,23 @@ def test_chain_with_offline_relay_does_not_crash():
     r = client.get("/cbba/sample", params=[("comms", "line"), ("offline", "sim-2")])
     assert r.status_code == 200
     assert r.json()["result"]["dispatch_allowed"] is False
+
+
+def test_sample_includes_round_by_round_trace():
+    body = client.get("/cbba/sample").json()
+    trace = body["trace"]
+    assert trace and trace[0]["round"] == 1
+    assert {e["kind"] for e in trace[0]["events"]} >= {"bid"}
+    # The last traced round's claims are the final plan.
+    final = {p["drone_id"]: p["bundle"] for p in body["result"]["plans"]}
+    assert trace[-1]["claims"] == final
+
+
+def test_plan_accepts_an_operator_built_scenario():
+    scenario = client.get("/cbba/sample").json()["scenario"]
+    scenario["points"] = scenario["points"][:3]
+    r = client.post("/cbba/plan", json=scenario)
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["scenario"]["points"]) == 3 and body["result"]["converged"]
+    assert client.post("/cbba/plan", json={"drones": [], "points": [], "geofence": {"points": []}}).status_code == 422

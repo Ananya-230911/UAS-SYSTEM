@@ -26,9 +26,10 @@ to.
 
 ## CBBA multi-drone panel (simulation)
 
-The **CBBA task allocation** section in the right-hand panel (`cbba.js`)
-asks `services/fleet-agent`'s read-only server for a simulated multi-drone
-allocation and draws it: geofence, inspection points coloured by the drone
-that won them, each drone's route, and the safety gate's verdict. It sends
-nothing to any vehicle. Start the server with `scripts/run_cbba.ps1`; the
+The **Multi-drone (simulation)** sections in the right-hand panel
+(`cbba.js`): set up drones and places by clicking the map (anywhere), plan
+with CBBA via `services/fleet-agent`'s read-only server, replay how the
+drones decided round by round, and fly the plan in a browser-side
+simulation (with a "make this drone fail" re-plan). It sends nothing to any
+vehicle. Start the server with `scripts/run_cbba.ps1`; the
 page defaults to `http://localhost:8020` (override with `?cbba=...`).

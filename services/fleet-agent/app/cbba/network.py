@@ -66,6 +66,9 @@ class CommsGraph:
     def neighbours(self, drone_id: str) -> list[str]:
         return sorted(o for o in self.drone_ids if o != drone_id and frozenset((drone_id, o)) in self._links)
 
+    def links(self) -> list[tuple[str, str]]:
+        return sorted(tuple(sorted(link)) for link in self._links)
+
     def set_link(self, a: str, b: str, up: bool) -> None:
         """Cut or restore one link (used by failure scenarios)."""
         key = frozenset((a, b))
