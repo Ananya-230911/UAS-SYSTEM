@@ -95,6 +95,16 @@ if (typeof module !== "undefined" && module.exports) {
 // ---------------------------------------------------------------------------
 // Browser only below.
 
+// If the map library failed to load, say so instead of a silent dead button.
+if (typeof document !== "undefined" && typeof L === "undefined") {
+  const out = document.getElementById("cbba-output");
+  if (out) {
+    out.textContent =
+      "The map library (Leaflet) did not load, so nothing can be drawn. " +
+      "Pull the latest code (Leaflet is now bundled in apps/gcs-web/vendor/) and reload with Ctrl+Shift+R.";
+  }
+}
+
 if (typeof document !== "undefined" && typeof L !== "undefined") {
   const CBBA_BASE = params.get("cbba") || "http://localhost:8020";
   const cbbaLayer = L.layerGroup().addTo(map);
