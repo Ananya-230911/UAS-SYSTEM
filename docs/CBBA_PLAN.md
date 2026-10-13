@@ -1,8 +1,8 @@
 # CBBA Multi-Drone Task Allocation — Revised Plan (for approval)
 
-Status: **PROPOSED — waiting for approval. No implementation files have
-been changed.** Phase A (read-only audit) is done; Phase B starts only
-after this plan is approved.
+Status: **APPROVED.** Phase A (audit) done. Phase B (CBBA core) done; see
+`docs/adr/0018-cbba-core-allocation.md`. One deviation found while building
+Phase B: bid warping was added to the bundle phase (section 2A, Decide).
 
 Simulation only. These are inspection scenarios: drones visit inspection
 points and take pictures. Nothing in this plan arms, takes off, or commands
@@ -80,6 +80,12 @@ version 1 this is an in-memory queue, labelled `CBBA-sync-sim`.
    (eq. 6).
 3. Ties always break the same way: higher bid wins, then lower drone id,
    then lower point id. The same inputs always give the same answer.
+4. *Bid warping* (added in Phase B, see ADR-0018). With travel time, a
+   point can be worth MORE after a nearby point is added, which breaks
+   the paper's diminishing-gain assumption and made drones trade a point
+   back and forth forever in testing. A drone still picks by true gain,
+   but the bid it publishes is capped at its earlier bids (Johnson, Choi,
+   Ponda & How, CDC 2012), which restores convergence.
 
 **Act.** CBBA only produces a plan. It moves nothing.
 - The allocation is final only when two things hold: no drone's

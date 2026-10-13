@@ -32,6 +32,33 @@ drones"` (it asks, rather than guessing), `"survey at 500 m"` (the safety
 layer rejects it), or stop one drone's simulator and plan again (it is
 skipped as disconnected — never planned with stale data).
 
+## CBBA: drones split inspection points among themselves (simulation)
+
+Phase B of `docs/CBBA_PLAN.md` (see `docs/adr/0018-cbba-core-allocation.md`).
+Simulated drones bid for places to inspect and agree on who goes where using
+CBBA -- no central planner, no LLM. A deterministic safety gate then checks
+the result; anything that fails is blocked. Nothing is flown.
+
+```powershell
+cd services\fleet-agent
+$env:PYTHONPATH = "."
+..\..\.venv\Scripts\python.exe -m app.cbba.demo                    # everyone can talk
+..\..\.venv\Scripts\python.exe -m app.cbba.demo --comms line       # sim-1 <-> sim-2 <-> sim-3
+..\..\.venv\Scripts\python.exe -m app.cbba.demo --comms split      # sim-3 cut off -> blocked
+..\..\.venv\Scripts\python.exe -m app.cbba.demo --offline sim-2    # one drone down
+```
+
+| File | What it does |
+| --- | --- |
+| `app/cbba/models.py` | Inspection points, drones (with sensors), comms, config, results |
+| `app/cbba/scoring.py` | Time-discounted score; best place to insert a point into a route |
+| `app/cbba/agent.py` | One drone's CBBA: build bundle, consensus (paper Table I), release lost points; bid warping |
+| `app/cbba/network.py` | Comms graph and in-memory message transport (labelled simulation) |
+| `app/cbba/runner.py` | Runs rounds until the drones agree |
+| `app/cbba/sga.py` | Centralised greedy reference answer, used to check CBBA |
+| `app/cbba/safety_gate.py` | Fence, altitude, battery, sensor, deadline, duplicate checks -- reuses `app/safety/validator.py` |
+| `app/cbba/service.py` | `allocate(scenario)` -- the single entry point |
+
 ## What's here
 
 | File | What it does |
