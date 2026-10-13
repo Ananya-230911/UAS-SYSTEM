@@ -130,6 +130,28 @@
       </section>
 
       <section class="section-cbba">
+        <h2>Tell the drones (optional)</h2>
+        <p class="hint">
+          Type a change in plain words. The AI (or the built-in rules) only
+          turns it into change requests; a fixed-rule check accepts or
+          refuses each one, and you decide whether to apply them. The AI
+          never plans routes or decides safety.
+        </p>
+        <textarea id="cbba-instruct-text" rows="2" placeholder="e.g. P3 is high priority, P2 needs thermal, D2 is offline"></textarea>
+        <div class="button-row">
+          <select id="cbba-engine" aria-label="who reads the instruction">
+            <option value="auto">Groq if set up, else rules</option>
+            <option value="rules">Built-in rules only</option>
+            <option value="crewai">CrewAI supervisor (optional)</option>
+          </select>
+          <button id="btn-cbba-understand">Understand</button>
+          <button id="btn-cbba-apply" disabled>Apply and re-plan</button>
+        </div>
+        <p id="cbba-ai-status" class="cbba-line cbba-muted"></p>
+        <div id="cbba-instruct-output" class="perception-panel"></div>
+      </section>
+
+      <section class="section-cbba">
         <h2>2 · Plan with CBBA</h2>
         <p class="hint">
           Each drone is an agent: it bids for places, talks to the drones it

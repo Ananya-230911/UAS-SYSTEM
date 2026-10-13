@@ -44,8 +44,10 @@ def test_allocate_any_scenario():
 
 
 def test_no_command_endpoints_exist():
+    """/missions/* only stores plans; nothing here can command a vehicle."""
     paths = {route.path for route in app.routes}
-    assert not any(word in p for p in paths for word in ("command", "arm", "takeoff", "mission", "dispatch"))
+    words = ("command", "arm", "takeoff", "dispatch", "upload", "start", "rtl", "land", "fly")
+    assert not any(w in p.lower() for p in paths for w in words), paths
 
 
 def test_chain_with_offline_relay_does_not_crash():

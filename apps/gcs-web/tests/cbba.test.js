@@ -146,3 +146,24 @@ test("flight timeline: fly to each place, hover, fly home; position in between",
   assert.deepEqual(m.cbbaPositionAt(tl, 12), { lat: 0.001, lon: 0 }); // hovering at p1
   assert.deepEqual(m.cbbaPositionAt(tl, 1e6), { lat: 0, lon: 0 }); // home
 });
+
+test("an instruction's checked scenario updates only allowed fields in the editor", () => {
+  const state = {
+    drones: [D("a", 1, 1), D("b", 1, 1)],
+    points: [P("p1", 2, 2), P("p2", 3, 3, { sensor: "thermal" })],
+    fence: [{ lat: 0, lon: 0 }], radioMode: "range", rangeM: 50, missionId: "M-1",
+  };
+  const sc = {
+    drones: [{ drone_id: "a", health: "OK" }, { drone_id: "b", health: "OFFLINE" }],
+    points: [{ point_id: "p1", required_capability: "lidar", value: 150, deadline_s: 60, lat: 99, lon: 99 }],
+  };
+  const out = m.cbbaApplyScenario(state, sc);
+  assert.deepEqual(out.points.map((p) => p.id), ["p1"]); // p2 skipped
+  assert.equal(out.points[0].sensor, "lidar");
+  assert.equal(out.points[0].value, 150);
+  assert.equal(out.points[0].deadline, 60);
+  assert.equal(out.points[0].lat, 2); // positions never come from the server
+  assert.equal(out.drones[1].offline, true);
+  assert.equal(out.radioMode, "range");
+  assert.equal(out.missionId, "M-1");
+});

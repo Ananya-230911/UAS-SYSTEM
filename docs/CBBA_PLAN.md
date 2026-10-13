@@ -1,7 +1,7 @@
 # CBBA Multi-Drone Task Allocation — Revised Plan (for approval)
 
-Status: **APPROVED.** Phase A (audit) done. Phase B (CBBA core) done; see
-`docs/adr/0018-cbba-core-allocation.md`. One deviation found while building
+Status: **APPROVED.** Phases A-D done (ADR-0018, ADR-0019); a first slice
+of F (map panel, mission editor, replay, simulated flight) was built early. One deviation found while building
 Phase B: bid warping was added to the bundle phase (section 2A, Decide).
 
 Simulation only. These are inspection scenarios: drones visit inspection

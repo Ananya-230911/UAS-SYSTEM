@@ -129,9 +129,11 @@ def test_claude_response_without_structured_output_is_malformed():
 
 def test_default_provider_is_rules_without_an_api_key(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
     assert isinstance(default_provider(), RuleBasedGoalParser)
 
 
 def test_default_provider_is_claude_with_an_api_key(monkeypatch):
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-not-real")
     assert isinstance(default_provider(), ClaudeGoalParser)

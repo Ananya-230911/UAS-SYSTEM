@@ -75,6 +75,24 @@ without the flight simulators running. `app/server.py` is read-only:
 | `app/cbba/safety_gate.py` | Fence, altitude, battery, sensor, deadline, duplicate checks -- reuses `app/safety/validator.py` |
 | `app/cbba/service.py` | `allocate(scenario)` -- the single entry point |
 
+## Tell the drones (Phase D, optional AI)
+
+In the GCS panel, type e.g. *"P3 is high priority, P2 needs thermal, D2 is
+offline"* and press **Understand**. Built-in rules read it (offline, no key);
+with a Groq key, Groq reads it. Either way the result is only a list of
+*requested* changes: a fixed-rule check (`app/supervisor/gate.py`) accepts or
+refuses each one, you press **Apply and re-plan**, CBBA re-plans and the
+safety gate decides. Every plan is saved as a mission version
+(`GET /missions`).
+
+```powershell
+# optional: use Groq (free key from https://console.groq.com/keys)
+$env:GROQ_API_KEY = "gsk_..."          # never commit it; see .env.example
+# optional: the CrewAI supervisor (large install)
+..\..\.venv\Scripts\pip.exe install -r requirements-crew.txt
+```
+See `docs/adr/0019-cbba-phase-d-instructions-groq-crewai-store.md`.
+
 ## What's here
 
 | File | What it does |

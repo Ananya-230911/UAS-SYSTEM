@@ -98,6 +98,27 @@ function cbbaBuildScenario(state) {
   };
 }
 
+// The server's checked scenario (after an instruction) -> editor state.
+// Only the fields an instruction may change are copied: a place's sensor,
+// priority (value) and deadline, whether it is still in the mission, and
+// whether a drone is offline. Positions, fence and radio stay as they are.
+function cbbaApplyScenario(state, sc) {
+  const pts = Object.fromEntries(sc.points.map((p) => [p.point_id, p]));
+  const drs = Object.fromEntries(sc.drones.map((d) => [d.drone_id, d]));
+  return {
+    ...state,
+    points: state.points
+      .filter((p) => pts[p.id])
+      .map((p) => ({
+        ...p,
+        sensor: pts[p.id].required_capability || "",
+        value: pts[p.id].value,
+        deadline: pts[p.id].deadline_s || "",
+      })),
+    drones: state.drones.map((d) => (drs[d.id] ? { ...d, offline: drs[d.id].health === "OFFLINE" } : d)),
+  };
+}
+
 // Problems to fix before asking the server (plain English).
 function cbbaCheckState(state) {
   const problems = [];
@@ -275,7 +296,7 @@ function cbbaShortName(pointId) {
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     cbbaDroneColor, cbbaDistanceM, cbbaAutoFence, cbbaLinks, cbbaBuildScenario, cbbaCheckState,
-    cbbaPointStatuses, cbbaClaimOwners, cbbaReplaySteps, cbbaEventText, cbbaTimeline, cbbaPositionAt,
+    cbbaPointStatuses, cbbaClaimOwners, cbbaApplyScenario, cbbaReplaySteps, cbbaEventText, cbbaTimeline, cbbaPositionAt,
     cbbaGroupIssues, cbbaAgreementText, cbbaEscape, cbbaShortName, CBBA_COLORS,
   };
 }
@@ -302,7 +323,8 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
   const esc = cbbaEscape;
 
   // ---- state -------------------------------------------------------------
-  let state = { drones: [], points: [], fence: null, radioMode: "all", rangeM: 300 };
+  let state = { drones: [], points: [], fence: null, radioMode: "all", rangeM: 300, missionId: null };
+  let proposal = null; // last /cbba/instruct answer
   let clickMode = null; // "drone" | "point" | "fence"
   let fenceDraft = [];
   let view = "edit"; // "edit" | "plan" | "replay" | "fly"
@@ -631,21 +653,25 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
     );
   }
 
-  async function postPlan(scenario) {
-    const resp = await fetch(`${CBBA_BASE}/cbba/plan`, {
+  async function postPlan(scenario, meta = {}) {
+    const resp = await fetch(`${CBBA_BASE}/missions/plan`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(scenario),
+      body: JSON.stringify({ scenario, mission_id: state.missionId, source: "operator", ...meta }),
     });
     const body = await resp.json().catch(() => ({}));
     if (!resp.ok) {
       const detail = Array.isArray(body.detail) ? body.detail.map((d) => d.msg).join("; ") : body.detail || resp.status;
       throw new Error(`the server rejected the mission: ${detail}`);
     }
+    if (body.mission) {
+      state.missionId = body.mission.mission_id;
+      save();
+    }
     return body;
   }
 
-  async function runPlan() {
+  async function runPlan(meta = {}) {
     if (clickMode) setClickMode(clickMode);
     stopFlight();
     const problems = cbbaCheckState(state);
@@ -655,7 +681,7 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
     }
     $("cbba-output").textContent = "The drones are planning…";
     try {
-      last = await postPlan(cbbaBuildScenario(state));
+      last = await postPlan(cbbaBuildScenario(state), meta);
     } catch (err) {
       $("cbba-output").textContent = String(err).includes("rejected") ? String(err) : serverDown(err);
       return;
@@ -682,6 +708,10 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
         : '<div class="cbba-verdict cbba-verdict--blocked">Safety gate: BLOCKED</div>'
     );
     parts.push(`<div class="cbba-label">${esc(result.label)} &middot; simulation only, nothing is flown</div>`);
+    if (last.mission) {
+      const m = last.mission;
+      parts.push(`<div class="cbba-label">Saved as mission ${esc(m.mission_id)}, version ${m.version}${m.source !== "operator" ? ` (${esc(m.source)})` : ""}</div>`);
+    }
     parts.push(`<p class="cbba-line">${esc(cbbaAgreementText(result))}</p>`);
     parts.push('<div class="perception-heading">Who inspects what</div><ul class="cbba-list">');
     for (const plan of result.plans) {
@@ -864,7 +894,7 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
     }
     let resp;
     try {
-      resp = await postPlan(scenario);
+      resp = await postPlan(scenario, { source: "failure-replan", changes: [`${who} failed at t=${Math.round(fly.offset + T)} s`] });
     } catch (err) {
       logFlight(`Re-plan failed: ${err}`);
       renderFlight();
@@ -931,6 +961,7 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
       }));
       state.fence = sc.geofence.points.map((p) => ({ lat: p.lat, lon: p.lon }));
       state.radioMode = "all";
+      state.missionId = null;
       edited();
       fitAll();
       $("cbba-output").textContent = "Example loaded (3 drones, 11 places near Stanford). Click Run CBBA.";
@@ -941,9 +972,82 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
 
   function clearAll() {
     if ((state.drones.length || state.points.length) && !confirm("Remove all drones, places and the fence?")) return;
-    state = { drones: [], points: [], fence: null, radioMode: state.radioMode, rangeM: state.rangeM };
+    state = { drones: [], points: [], fence: null, radioMode: state.radioMode, rangeM: state.rangeM, missionId: null };
     edited();
     $("cbba-output").textContent = "Cleared. Search for any city above the map, then add drones and places.";
+  }
+
+  // ---- "tell the drones" (instructions) -----------------------------------------
+  async function refreshAiStatus() {
+    try {
+      const s = await (await fetch(`${CBBA_BASE}/ai/status`)).json();
+      $("cbba-ai-status").textContent = s.groq_configured
+        ? `AI: Groq key found${s.crewai_installed ? ", CrewAI installed" : ""}. If Groq can't be reached, the built-in rules take over.`
+        : "AI: no Groq key set, so the built-in rules understand your instruction (works offline).";
+    } catch (e) {
+      $("cbba-ai-status").textContent = "";
+    }
+  }
+
+  async function understand() {
+    const text = $("cbba-instruct-text").value.trim();
+    const out = $("cbba-instruct-output");
+    proposal = null;
+    $("btn-cbba-apply").disabled = true;
+    if (!text) {
+      out.textContent = "Type an instruction first.";
+      return;
+    }
+    const problems = cbbaCheckState(state);
+    if (problems.length) {
+      out.textContent = problems.join(" ");
+      return;
+    }
+    out.textContent = "Reading your instruction…";
+    try {
+      const resp = await fetch(`${CBBA_BASE}/cbba/instruct`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scenario: cbbaBuildScenario(state), text, engine: $("cbba-engine").value }),
+      });
+      proposal = await resp.json();
+      if (!resp.ok) throw new Error(JSON.stringify(proposal.detail || resp.status));
+    } catch (err) {
+      out.textContent = serverDown(err);
+      return;
+    }
+    const parts = [];
+    if (proposal.question) {
+      parts.push(`<p class="cbba-line">${esc(proposal.question)}</p>`);
+    } else {
+      parts.push(`<div class="cbba-label">Understood by: ${esc(proposal.provider)}</div>`);
+      if (proposal.accepted.length) {
+        parts.push('<div class="perception-heading">Changes that passed the check</div><ul class="cbba-list cbba-ok">');
+        for (const a of proposal.accepted) parts.push(`<li>✓ ${esc(a.change)}</li>`);
+        parts.push("</ul>");
+      }
+      if (proposal.rejected.length) {
+        parts.push('<div class="perception-heading">Refused by the check</div><ul class="cbba-list cbba-issues">');
+        for (const r of proposal.rejected) parts.push(`<li>✗ ${esc(r.change)}: ${esc(r.reason)}</li>`);
+        parts.push("</ul>");
+      }
+      if (proposal.scenario) parts.push('<p class="cbba-line cbba-muted">Nothing has changed yet. Press "Apply and re-plan" to use these changes.</p>');
+    }
+    out.innerHTML = parts.join("");
+    $("btn-cbba-apply").disabled = !(proposal && proposal.scenario);
+  }
+
+  async function applyProposal() {
+    if (!proposal || !proposal.scenario) return;
+    const text = $("cbba-instruct-text").value.trim();
+    const changes = proposal.accepted.map((a) => a.change);
+    state = cbbaApplyScenario(state, proposal.scenario);
+    proposal = null;
+    $("btn-cbba-apply").disabled = true;
+    edited();
+    $("cbba-instruct-output").innerHTML =
+      '<p class="cbba-line">Applied. The drones are re-planning…</p><ul class="cbba-list cbba-ok">' + changes.map((c) => `<li>✓ ${esc(c)}</li>`).join("") + "</ul>";
+    await runPlan({ source: "instruction", instruction: text, changes });
   }
 
   // ---- wiring -------------------------------------------------------------------
@@ -977,13 +1081,19 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
     $(id).addEventListener("change", onListChange);
     $(id).addEventListener("click", onListClick);
   }
-  $("btn-cbba-run").addEventListener("click", runPlan);
+  $("btn-cbba-run").addEventListener("click", () => runPlan());
   $("btn-cbba-step-show").addEventListener("click", startReplay);
   $("btn-cbba-step-prev").addEventListener("click", () => stepBy(-1));
   $("btn-cbba-step-next").addEventListener("click", () => stepBy(1));
   $("btn-cbba-fly").addEventListener("click", toggleFly);
   $("cbba-fly-speed").addEventListener("change", (e) => (fly.speed = Number(e.target.value)));
   $("btn-cbba-fail").addEventListener("click", failDrone);
+  $("btn-cbba-understand").addEventListener("click", understand);
+  $("btn-cbba-apply").addEventListener("click", applyProposal);
+  $("cbba-instruct-text").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) understand();
+  });
+  refreshAiStatus();
 
   const hadSaved = load();
   renderAll();

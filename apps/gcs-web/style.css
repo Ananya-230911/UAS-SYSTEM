@@ -800,3 +800,23 @@ main {
 }
 .cbba-drone { position: relative; }
 .cbba-drone--off span { text-decoration: line-through; }
+
+#cbba-instruct-text {
+  width: 100%;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 0.82rem;
+  resize: vertical;
+  margin-bottom: 0.4rem;
+}
+#cbba-engine {
+  padding: 0.3rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.78rem;
+  max-width: 11rem;
+}
+#btn-cbba-apply:not(:disabled) { background: #16a34a; border-color: #16a34a; color: white; }
+.cbba-ok li { color: #15803d; }

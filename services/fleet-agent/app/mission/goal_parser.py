@@ -3,9 +3,11 @@
 Two interchangeable providers behind one small interface:
   - RuleBasedGoalParser: keyword/regex rules. Deterministic, no network,
     no API key. Always available -- the default.
+  - GroqGoalParser: asks Groq (free tier, preferred) to fill the same
+    fixed schema. Used when GROQ_API_KEY is set (app/llm/groq.py).
   - ClaudeGoalParser: asks Claude to fill a fixed schema. Used only when
-    ANTHROPIC_API_KEY is set; the `anthropic` package is imported lazily
-    so nothing else in this service depends on it.
+    ANTHROPIC_API_KEY is set (and no Groq key); the `anthropic` package is
+    imported lazily so nothing else in this service depends on it.
 
 Rules every provider's output goes through, regardless of which one ran:
   - The AI only interprets the request. It never sees vehicles, never
@@ -120,7 +122,7 @@ class RuleBasedGoalParser:
             raise MalformedProviderOutput(str(exc)) from exc
 
 
-CLAUDE_SYSTEM_PROMPT = """\
+GOAL_SYSTEM_PROMPT = """\
 You turn a drone operator's request into a structured request for a SIMULATED \
 search-and-survey mission planner. The planner supports only area search, \
 survey, inspection and coverage missions.
@@ -155,7 +157,7 @@ class ClaudeGoalParser:
             response = client.messages.parse(
                 model=CLAUDE_MODEL,
                 max_tokens=16000,
-                system=CLAUDE_SYSTEM_PROMPT,
+                system=GOAL_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": text}],
                 output_format=ParsedGoal,
             )
@@ -180,6 +182,21 @@ class ClaudeGoalParser:
         return parsed
 
 
+class GroqGoalParser:
+    """Same contract as ClaudeGoalParser, via app/llm/groq.py."""
+
+    def __init__(self, client=None):
+        if client is None:
+            from app.llm.groq import GroqJsonClient
+
+            client = GroqJsonClient()
+        self._client = client
+        self.name = f"groq ({client.model})"
+
+    def parse(self, text: str) -> ParsedGoal:
+        return self._client.complete_json(GOAL_SYSTEM_PROMPT, text, ParsedGoal)
+
+
 def _is_anthropic_api_error(exc: Exception) -> bool:
     try:
         import anthropic
@@ -189,8 +206,11 @@ def _is_anthropic_api_error(exc: Exception) -> bool:
 
 
 def default_provider() -> GoalParserProvider:
-    """Claude only when a key is configured; rules otherwise. Simulation
-    and offline use never need a key."""
+    """Groq if GROQ_API_KEY is set (preferred), else Claude if
+    ANTHROPIC_API_KEY is set, else rules. Simulation and offline use never
+    need a key."""
+    if os.environ.get("GROQ_API_KEY"):
+        return GroqGoalParser()
     if os.environ.get("ANTHROPIC_API_KEY"):
         return ClaudeGoalParser()
     return RuleBasedGoalParser()

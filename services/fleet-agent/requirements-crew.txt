@@ -1,0 +1,6 @@
+# OPTIONAL: the CrewAI supervisor (app/crew/). Not needed for anything
+# else -- planning, safety, the GCS panel and all core tests work without it.
+# Large (~137 packages). Needs Python >=3.10,<3.14 and a GROQ_API_KEY to do
+# anything useful.
+#   ..\..\.venv\Scripts\pip.exe install -r requirements-crew.txt
+crewai==1.15.27
