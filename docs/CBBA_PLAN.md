@@ -339,6 +339,10 @@ class Transport(Protocol):
   - a partition then a merge;
   - fence or battery failure → blocked;
   - capability mismatch never assigned.
+- **Moved forward (done after C, at the operator's request):** a read-only
+  first slice of D's server (`app/server.py`, port 8020) and of F's map panel
+  (`apps/gcs-web/cbba.js`), so the CBBA result can be seen in the GCS UI.
+  See ADR-0018, "Map preview".
 - **D — Backend + supervisor:**
   - `MissionStore` (in-memory);
   - `server.py` on :8020;

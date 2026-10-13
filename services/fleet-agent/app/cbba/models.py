@@ -94,6 +94,9 @@ class Scenario(BaseModel):
             raise ValueError("drone ids must be unique")
         if len(set(point_ids)) != len(point_ids):
             raise ValueError("point ids must be unique")
+        for a, b in self.comms.links or []:
+            if a not in drone_ids or b not in drone_ids:
+                raise ValueError(f"comms link {a}-{b} names an unknown drone")
         return self
 
 
@@ -128,6 +131,9 @@ class CbbaResult(BaseModel):
     # True when every drone that can hear each other (directly or through
     # others) ended with identical winner lists.
     agreement: bool
+    # Groups of drones that can hear each other (directly or by relay) at
+    # the end of the run. More than one group = the radio network is split.
+    comms_groups: list[list[str]]
     plans: list[DronePlan]
     winners: dict[str, str | None]
     total_score: float

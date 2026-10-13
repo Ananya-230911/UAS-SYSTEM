@@ -48,8 +48,22 @@ $env:PYTHONPATH = "."
 ..\..\.venv\Scripts\python.exe -m app.cbba.demo --offline sim-2    # one drone down
 ```
 
+**See it on the map (GCS page):**
+
+```powershell
+# one-time: .venv\Scripts\pip.exe install -r services\fleet-agent\requirements.txt
+powershell -ExecutionPolicy Bypass -File scripts\run_cbba.ps1      # server on :8020
+cd apps\gcs-web; ..\..\.venv\Scripts\python.exe -m http.server 8080  # if the GCS isn't already running
+```
+Open `http://localhost:8080/`, scroll the right-hand panel to **CBBA task
+allocation**, pick the radio links / offline drones, and click **Run CBBA**.
+Works with or without simulated drones running. `app/server.py` is read-only:
+`GET /health`, `GET /cbba/sample?comms=full|line|split&offline=sim-2`,
+`POST /cbba/allocate` -- no command endpoints.
+
 | File | What it does |
 | --- | --- |
+| `app/server.py` | Read-only HTTP API on port 8020 for the GCS panel |
 | `app/cbba/models.py` | Inspection points, drones (with sensors), comms, config, results |
 | `app/cbba/scoring.py` | Time-discounted score; best place to insert a point into a route |
 | `app/cbba/agent.py` | One drone's CBBA: build bundle, consensus (paper Table I), release lost points; bid warping |

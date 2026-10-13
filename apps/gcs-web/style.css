@@ -635,3 +635,118 @@ main {
   color: var(--muted);
   line-height: 1.4;
 }
+
+/* --- Multi-drone CBBA simulation panel (cbba.js) ---------------------- */
+
+#panel section.section-cbba {
+  border-left-color: #7c3aed;
+}
+
+.cbba-field {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin: 0.45rem 0;
+}
+
+.cbba-field select {
+  padding: 0.3rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.8rem;
+  color: var(--ink);
+  max-width: 13rem;
+}
+
+.cbba-checks {
+  display: flex;
+  gap: 0.6rem;
+}
+
+.cbba-checks label {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  color: var(--ink);
+}
+
+#btn-cbba-run {
+  background: #7c3aed;
+  border-color: #7c3aed;
+  color: white;
+}
+#btn-cbba-run:hover { background: #6d28d9; border-color: #6d28d9; }
+
+#cbba-output { white-space: pre-line; }
+#cbba-output ul, #cbba-output p, #cbba-output div { white-space: normal; }
+
+.cbba-verdict {
+  display: inline-block;
+  padding: 0.25rem 0.7rem;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 0.78rem;
+}
+.cbba-verdict--ok { background: var(--green-light); color: #15803d; }
+.cbba-verdict--blocked { background: var(--red-light); color: var(--red); }
+
+.cbba-label { font-size: 0.72rem; color: var(--muted); margin: 0.35rem 0; }
+.cbba-line { margin: 0.35rem 0; font-size: 0.8rem; color: var(--ink); }
+.cbba-muted { color: var(--muted); }
+
+.cbba-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.8rem;
+  color: var(--ink);
+}
+.cbba-list li { padding: 0.25rem 0; border-bottom: 1px solid #f1f5f9; line-height: 1.4; }
+.cbba-issues li { color: var(--red); }
+
+.cbba-dot {
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  margin-right: 0.35rem;
+  vertical-align: middle;
+}
+
+/* Map markers */
+.cbba-point-wrap, .cbba-drone-wrap { background: none; border: none; }
+
+.cbba-point {
+  font: 700 10px/18px "Segoe UI", system-ui, sans-serif;
+  text-align: center;
+  color: #0f172a;
+  border: 1.5px solid #0f172a;
+  border-radius: 999px;
+  box-shadow: var(--shadow-sm);
+}
+.cbba-point--sensor { border-radius: 3px; }
+
+.cbba-drone {
+  font-size: 20px;
+  line-height: 24px;
+  text-align: center;
+  text-shadow: 0 0 2px white, 0 0 2px white;
+}
+.cbba-drone span {
+  position: absolute;
+  top: -15px;
+  left: 50%;
+  transform: translateX(-50%);
+  font: 700 10px/1 "Segoe UI", system-ui, sans-serif;
+  white-space: nowrap;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  padding: 1px 4px;
+  text-shadow: none;
+}
+.cbba-drone { position: relative; }
+.cbba-drone--off span { text-decoration: line-through; }

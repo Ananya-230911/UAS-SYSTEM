@@ -18,6 +18,7 @@ from __future__ import annotations
 from app.cbba.models import (
     SIM_LABEL,
     CbbaResult,
+    CommsSpec,
     DroneHealth,
     DronePlan,
     DroneSpec,
@@ -60,6 +61,15 @@ def _split_inputs(scenario: Scenario):
     return drones, excluded_drones, points, excluded_points
 
 
+def _live_links(scenario: Scenario, drones: list[DroneSpec]) -> CommsSpec:
+    """A drone that takes no part (offline, or outside the fence) relays
+    nothing: drop its links. Taking out a relay can split the network."""
+    if scenario.comms.links is None:
+        return scenario.comms
+    active = {d.drone_id for d in drones}
+    return CommsSpec(links=[(a, b) for a, b in scenario.comms.links if a in active and b in active])
+
+
 def _drone_plan(drone: DroneSpec, path: list[str], bundle: list[str], by_id, scenario: Scenario, alt: float) -> DronePlan:
     pts = [by_id[pid] for pid in path]
     ev = evaluate_path(drone, pts, scenario.constraints, scenario.config, alt)
@@ -98,14 +108,16 @@ def allocate(scenario: Scenario, method: str = "CBBA") -> CbbaResult:
     by_id = {p.point_id: p for p in points}
 
     if method == "CBBA" and drones:
-        graph = CommsGraph.from_spec(scenario.comms, drones)
+        graph = CommsGraph.from_spec(_live_links(scenario, drones), drones)
         run = run_cbba(drones, points, scenario.constraints, scenario.config, graph, altitudes)
         paths = {aid: (a.path, a.bundle) for aid, a in run.agents.items()}
         converged, agreement, label = run.converged, run.agreement, SIM_LABEL
+        groups = graph.components()
         rounds, last_change, messages = run.rounds, run.last_change_round, run.messages_sent
     else:
         paths = run_sga(drones, points, scenario.constraints, scenario.config, altitudes) if drones else {}
         converged, agreement = bool(drones), True
+        groups = [[d.drone_id for d in drones]] if drones else []
         rounds, last_change, messages = 0, 0, 0
         label = SGA_LABEL if method == "SGA" else SIM_LABEL
 
@@ -147,6 +159,7 @@ def allocate(scenario: Scenario, method: str = "CBBA") -> CbbaResult:
         last_change_round=last_change,
         messages_sent=messages,
         agreement=agreement,
+        comms_groups=groups,
         plans=plans,
         winners=winners,
         total_score=round(sum(p.score for p in plans), 4),

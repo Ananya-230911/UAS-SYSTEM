@@ -203,3 +203,56 @@ LLM, no simulator.
 The runner gained optional `link_events` (cut or restore links at given
 rounds) for the partition/merge tests. Phase E's comms-failure scenarios
 will reuse it.
+
+## Map preview (moved forward at the operator's request)
+After Phase C the operator asked to see the work in the GCS UI. So a
+read-only slice of Phase D (server) and Phase F (map panel) was built
+early.
+
+**Server: `services/fleet-agent/app/server.py`** (FastAPI, port 8020).
+- Endpoints:
+  - `GET /health`
+  - `GET /cbba/sample?comms=&offline=`, which returns the scenario, the
+    result and the SGA comparison;
+  - `POST /cbba/allocate`.
+- No command endpoints; a test enforces this.
+- No storage yet. `services/api` is untouched.
+- Launcher: `scripts/run_cbba.ps1`.
+
+**Map panel: `apps/gcs-web/cbba.js`**, plus a new "Multi-drone
+(simulation)" section in `index.html`. It draws on its own Leaflet
+layer:
+- the geofence;
+- each point, coloured by the drone that won it (white = not assigned,
+  grey = outside fence, red = claimed twice);
+- each drone's route;
+- drone start positions (offline drones crossed out).
+
+The panel shows:
+- the safety verdict;
+- the honest "simulation only" label;
+- a plain-English sentence on how agreement was reached (including
+  split radio networks);
+- who inspects what, what isn't inspected and why;
+- block reasons, grouped by code.
+
+The pure logic has Node tests (`tests/cbba.test.js`), and CI now also
+syntax-checks `cbba.js`.
+
+**Bug found by the UI, fixed.** "Chain comms + sim-2 offline" crashed the
+server: the chain's links still named the removed drone.
+- Fix: a drone that takes no part relays nothing, so its links are
+  dropped. Taking out the middle relay therefore splits the network, and
+  the gate blocks the plan.
+- `Scenario` now rejects links that name unknown drones.
+- `CbbaResult.comms_groups` reports the radio groups.
+- Regression tests: `test_offline_relay_drone_breaks_the_chain`,
+  `test_chain_with_offline_relay_does_not_crash`.
+
+**Verified in a real browser** (headless Chromium driving the page):
+- Three runs (normal, sim-3 cut off, chain with sim-2 offline) each
+  drew 11 point markers and 3 drone markers.
+- The panel showed the correct verdicts.
+- No page errors.
+- Map tiles were not loaded in the sandbox, which has no internet
+  access.

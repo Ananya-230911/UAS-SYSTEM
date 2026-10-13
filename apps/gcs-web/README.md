@@ -23,3 +23,12 @@ vehicle it hears from first (see
 Click any vehicle in the **Fleet** list, or its marker on the map, to
 switch which one the telemetry panel, commands, and mission planner apply
 to.
+
+## CBBA multi-drone panel (simulation)
+
+The **CBBA task allocation** section in the right-hand panel (`cbba.js`)
+asks `services/fleet-agent`'s read-only server for a simulated multi-drone
+allocation and draws it: geofence, inspection points coloured by the drone
+that won them, each drone's route, and the safety gate's verdict. It sends
+nothing to any vehicle. Start the server with `scripts/run_cbba.ps1`; the
+page defaults to `http://localhost:8020` (override with `?cbba=...`).

@@ -289,3 +289,25 @@ def test_partition_that_never_heals_leaves_double_claims_for_the_gate():
 def test_run_is_never_declared_converged_before_a_scheduled_link_change():
     run, _ = _run_with_link_events({1: CUT_SIM3, 40: RESTORE_SIM3})
     assert run.rounds >= 40
+
+
+def test_offline_relay_drone_breaks_the_chain():
+    """Chain sim-1 <-> sim-2 <-> sim-3 with sim-2 offline: its links go
+    dead with it, so sim-1 and sim-3 can't hear each other. Found when the
+    GCS panel crashed the server on this combination."""
+    r = allocate(sample_scenario("line", offline=["sim-2"]))
+    assert [x.item_id for x in r.excluded_drones] == ["sim-2"]
+    assert r.converged and r.agreement
+    assert not r.dispatch_allowed
+    assert {i.code for i in r.safety.issues} == {"DUPLICATE_ASSIGNMENT"}
+
+
+def test_comms_link_to_unknown_drone_is_rejected_at_input():
+    with pytest.raises(ValueError):
+        scenario([drone("a"), drone("b")], [point("p", 37.428, -122.169)], comms=CommsSpec(links=[("a", "typo")]))
+
+
+def test_result_reports_radio_groups():
+    assert allocate(sample_scenario("full")).comms_groups == [["sim-1", "sim-2", "sim-3"]]
+    assert allocate(sample_scenario("split")).comms_groups == [["sim-1", "sim-2"], ["sim-3"]]
+    assert allocate(sample_scenario("line", offline=["sim-2"])).comms_groups == [["sim-1"], ["sim-3"]]

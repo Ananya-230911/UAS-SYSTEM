@@ -92,6 +92,37 @@
         <div id="fence-status">No geofence set.</div>
       </section>
 
+      <h3 class="panel-group-label">Multi-drone (simulation)</h3>
+
+      <section class="section-cbba">
+        <h2>CBBA task allocation</h2>
+        <p class="hint">
+          Simulated drones share out inspection points among themselves
+          (CBBA), then a safety check approves or blocks the plan. Display
+          only -- nothing is sent to any vehicle. Needs the fleet-agent
+          server on port 8020 (see services/fleet-agent/README.md).
+        </p>
+        <label class="cbba-field">Radio links
+          <select id="cbba-comms">
+            <option value="full">Everyone can talk</option>
+            <option value="line">Chain: sim-1 &harr; sim-2 &harr; sim-3</option>
+            <option value="split">sim-3 cut off</option>
+          </select>
+        </label>
+        <div class="cbba-field">Offline drones
+          <span class="cbba-checks">
+            <label><input type="checkbox" class="cbba-offline" value="sim-1" /> sim-1</label>
+            <label><input type="checkbox" class="cbba-offline" value="sim-2" /> sim-2</label>
+            <label><input type="checkbox" class="cbba-offline" value="sim-3" /> sim-3</label>
+          </span>
+        </div>
+        <div class="button-row">
+          <button id="btn-cbba-run">Run CBBA</button>
+          <button id="btn-cbba-clear">Clear from map</button>
+        </div>
+        <div id="cbba-output" class="perception-panel">Not run yet.</div>
+      </section>
+
       <h3 class="panel-group-label">Tools</h3>
 
       <section class="section-tool">
@@ -147,5 +178,6 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="freshness.js"></script>
   <script src="app.js"></script>
+  <script src="cbba.js"></script>
 </body>
 </html>
