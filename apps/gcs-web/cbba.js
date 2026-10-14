@@ -198,6 +198,7 @@ function cbbaReplaySteps(trace) {
       phase: "talk",
       claims: r.claims,
       links: r.links,
+      messages: r.messages,
       events: drops,
       text:
         `Round ${r.round}, step 2 - talking: each drone sends its bids to every drone it can hear ` +
@@ -359,8 +360,64 @@ function cbbaMapView(south, west, north, east) {
   return { south: clamp(south, -89.9, 89.9), west: clamp(west, -180, 180), north: clamp(north, -89.9, 89.9), east: clamp(east, -180, 180) };
 }
 
+// One replay step (cbbaReplaySteps) -> plain sentences for the story box:
+// { title, lines: [{drone, text}], kept: "..." }. Long lists are cut to
+// maxLines with "+ n more".
+function cbbaStepStory(step, maxLines = 6) {
+  const short = cbbaShortName;
+  const cut = (arr) => (arr.length > maxLines ? [...arr.slice(0, maxLines), { drone: null, text: `+ ${arr.length - maxLines} more` }] : arr);
+  const keptText = Object.entries(step.claims)
+    .map(([d, pts]) => `${d}: ${pts.length ? pts.map(short).join(", ") : "nothing"}`)
+    .join(" · ");
+  if (step.phase === "bid") {
+    const bidOf = {};
+    for (const e of step.events) bidOf[`${e.drone}|${e.point}`] = e.bid;
+    const lines = Object.entries(step.claims).map(([d, pts]) => {
+      if (!pts.length) return { drone: d, text: `${d} wants nothing new` };
+      const best = pts.slice(0, 3).map((p) => (bidOf[`${d}|${p}`] != null ? `${short(p)} (bid ${Math.round(bidOf[`${d}|${p}`])})` : short(p)));
+      return { drone: d, text: `${d} wants ${pts.length} place(s): ${best.join(", ")}${pts.length > 3 ? " …" : ""}` };
+    });
+    const conflicts = Object.values(cbbaClaimOwners(step.claims)).filter((ds) => ds.length > 1).length;
+    return {
+      title: `Round ${step.round} · 🧠 Thinking alone`,
+      intro: "Each drone looks at every place, its own position and battery, and bids for the ones it can do best " +
+        "(a higher bid = it gets there sooner). Nobody has talked yet." +
+        (conflicts ? ` ${conflicts} place(s) are wanted by more than one drone (red on the map).` : ""),
+      lines,
+      kept: "",
+    };
+  }
+  // talk: group "outbid" by place, "after_lost" by drone
+  const wins = {};
+  const after = {};
+  const other = [];
+  for (const e of step.events) {
+    if (e.reason === "outbid") {
+      const k = `${e.point}|${e.winner}`;
+      (wins[k] = wins[k] || { point: e.point, winner: e.winner, bid: e.winner_bid, losers: [] }).losers.push(`${e.drone} (${Math.round(e.bid)})`);
+    } else if (e.reason === "after_lost") {
+      (after[e.drone] = after[e.drone] || []).push(short(e.point));
+    } else {
+      other.push({ drone: e.drone, text: `${e.drone} drops ${short(e.point)} for now (conflicting news) and will bid again` });
+    }
+  }
+  const lines = [
+    ...Object.values(wins).map((w) => ({ drone: w.winner, text: `${short(w.point)} → ${w.winner} (bid ${Math.round(w.bid)}); ${w.losers.join(", ")} give${w.losers.length > 1 ? "" : "s"} it up` })),
+    ...Object.entries(after).map(([d, pts]) => ({ drone: d, text: `${d} also lets go of ${pts.join(", ")} (they came after a place it lost)` })),
+    ...other,
+  ];
+  return {
+    title: `Round ${step.round} · 📡 Talking`,
+    intro: `They send each other their bids: ${step.messages} message(s) over ` +
+      `${step.links.length} radio link(s) (orange lines). For every place the highest bid wins; the others give it up.`,
+    lines: lines.length ? cut(lines) : [{ drone: null, text: "No conflicts: nobody had to give anything up." }],
+    kept: keptText,
+  };
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
+    cbbaStepStory,
     cbbaDroneColor, cbbaDistanceM, cbbaAutoFence, cbbaLinks, cbbaBuildScenario, cbbaCheckState,
     cbbaPointStatuses, cbbaClaimOwners, cbbaApplyScenario, cbbaReplaySteps, cbbaEventText,
     cbbaFrameAt, cbbaInspectorsUpTo, cbbaEpochAt, CBBA_STATUS_TEXT,
@@ -434,6 +491,7 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
 
   // Any edit makes the old plan stale.
   function edited() {
+    endExplain(false);
     stopSim();
     sim.data = null;
     clearCamera();
@@ -572,15 +630,27 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
       }
     }
 
-    // Radio links (replay "talk" step)
+    // Replay: who wants which place (thin lines drone -> place), and on a
+    // "talk" step the bids going between the drones (orange).
     const step = view === "replay" ? steps[stepIdx] : null;
-    if (step && step.links.length) {
+    if (step) {
       const pos = Object.fromEntries(state.drones.map((d) => [d.id, d]));
-      for (const [a, b] of step.links) {
-        if (!pos[a] || !pos[b]) continue;
-        L.polyline([[pos[a].lat, pos[a].lon], [pos[b].lat, pos[b].lon]], {
-          color: "#7c3aed", weight: 2, dashArray: "3 6", opacity: 0.9, interactive: false,
-        }).addTo(layer);
+      const ptPos = Object.fromEntries(state.points.map((p) => [p.id, p]));
+      for (const [d, pts] of Object.entries(step.claims)) {
+        if (!pos[d]) continue;
+        for (const pid of pts) {
+          if (!ptPos[pid]) continue;
+          L.polyline([[pos[d].lat, pos[d].lon], [ptPos[pid].lat, ptPos[pid].lon]], {
+            color: color(d), weight: step.phase === "bid" ? 1.5 : 2.5, dashArray: step.phase === "bid" ? "4 6" : null, opacity: 0.6, interactive: false,
+          }).addTo(layer);
+        }
+      }
+      if (step.phase === "talk") {
+        for (const [a, b] of step.links) {
+          if (!pos[a] || !pos[b]) continue;
+          L.polyline([[pos[a].lat, pos[a].lon], [pos[b].lat, pos[b].lon]], { color: "#f97316", weight: 6, opacity: 0.9, ...noBubble })
+            .bindTooltip(`${esc(a)} ⇄ ${esc(b)}: sending each other their bids`).addTo(layer);
+        }
       }
     }
 
@@ -656,9 +726,14 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
     });
   }
 
+  // Zoom to the mission, leaving room on the right for the story box
+  // (top-right) on screens wide enough to have both side by side.
   function fitAll() {
     const fence = currentFence();
-    if (fence) map.fitBounds(L.latLngBounds(fence.map((f) => [f.lat, f.lon])).pad(0.1));
+    if (!fence) return;
+    const w = map.getSize().x;
+    const right = w > 900 ? Math.min(470, w * 0.4) : 20;
+    map.fitBounds(L.latLngBounds(fence.map((f) => [f.lat, f.lon])), { paddingTopLeft: [30, 70], paddingBottomRight: [right, 20] });
   }
 
   // ---- setup lists -------------------------------------------------------------
@@ -1009,6 +1084,7 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
   }
 
   function renderSim() {
+    renderStory();
     const has = !!sim.data;
     $("btn-cbba-sim-play").disabled = !has;
     $("btn-cbba-sim-play").textContent = sim.running ? "Pause" : "Play";
@@ -1171,11 +1247,126 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
     }
     setSurveyHeader(
       intro +
-      `<p class="cbba-line">✓ ${esc(cbbaAgreementText(last.result))} Safety check passed. Now flying - watch the map: ` +
-      "orange lines = drones sending each other bids, 📷 = what each camera saw. You can still type a change in " +
-      '"Tell the drones" (e.g. <i>D2 is offline</i>) or make a drone fail in "4 · Live agents".</p>'
+      `<p class="cbba-line">✓ ${esc(cbbaAgreementText(last.result))} Safety check passed. ` +
+      "<b>Watch the box on the map</b>: it first shows, step by step, how the drones decided, then narrates the flight. " +
+      'You can still type a change in "Tell the drones" (e.g. <i>D2 is offline</i>) or make a drone fail in "4 · Live agents".</p>'
     );
+    if (!(await explainDecision())) return;
     await runSim(false);
+  }
+
+  // ---- the story box on the map: explains what is happening, in words ---------------
+  const STEP_MS = 4500;
+  const explain = { on: false, paused: false, nextAt: 0, timer: null, resolve: null };
+
+  // Play the decision rounds one step at a time; resolves true to go on
+  // flying, false if the mission was changed meanwhile.
+  function explainDecision() {
+    if (!steps.length) return Promise.resolve(true);
+    stopSim();
+    return new Promise((resolve) => {
+      Object.assign(explain, { on: true, paused: false, nextAt: Date.now() + STEP_MS, resolve });
+      view = "replay";
+      stepIdx = 0;
+      renderAll();
+      explain.timer = setInterval(() => {
+        if (explain.paused) {
+          explain.nextAt += 200;
+          renderStory();
+        } else if (Date.now() >= explain.nextAt) {
+          if (stepIdx >= steps.length - 1) return endExplain(true);
+          stepIdx++;
+          explain.nextAt = Date.now() + STEP_MS;
+          renderAll();
+        }
+      }, 200);
+    });
+  }
+  function endExplain(go) {
+    if (!explain.on) return;
+    clearInterval(explain.timer);
+    explain.on = false;
+    const r = explain.resolve;
+    explain.resolve = null;
+    if (r) r(go);
+  }
+
+  const Story = L.Control.extend({
+    options: { position: "topright" },
+    onAdd() {
+      const div = L.DomUtil.create("div", "cbba-story");
+      L.DomEvent.disableClickPropagation(div);
+      L.DomEvent.disableScrollPropagation(div);
+      div.addEventListener("click", (e) => {
+        const a = e.target.dataset.story;
+        if (!a) return;
+        if (a === "next") {
+          if (explain.on && stepIdx >= steps.length - 1) return endExplain(true);
+          stepBy(1);
+          explain.nextAt = Date.now() + STEP_MS;
+        } else if (a === "prev") {
+          stepBy(-1);
+          explain.paused = true;
+        } else if (a === "pause") {
+          explain.paused = !explain.paused;
+        } else if (a === "fly") {
+          if (explain.on) endExplain(true);
+          else runSim(false);
+        } else if (a === "explain") {
+          explainDecision().then((go) => go && runSim(false));
+        }
+        survey.storyKey = "";
+        renderStory();
+      });
+      return div;
+    },
+  });
+  const storyBox = new Story().addTo(map).getContainer();
+
+  function renderStory() {
+    const dot = (d) => (d ? `<span class="cbba-dot" style="background:${color(d)}"></span>` : "");
+    const btn = (a, label) => `<button data-story="${a}">${label}</button>`;
+    let html = "";
+    if (view === "replay" && steps.length) {
+      const st = cbbaStepStory(steps[stepIdx]);
+      const isLast = stepIdx === steps.length - 1;
+      html =
+        `<div class="cbba-story-head">How the drones decide · step ${stepIdx + 1} of ${steps.length}</div>` +
+        `<div class="cbba-story-title">${esc(st.title)}</div><p>${esc(st.intro)}</p>` +
+        `<ul>${st.lines.map((l) => `<li>${dot(l.drone)}${esc(l.text)}</li>`).join("")}</ul>` +
+        (st.kept ? `<p class="cbba-story-kept"><b>Each drone now keeps:</b> ${esc(st.kept)}</p>` : "") +
+        (isLast ? '<p class="cbba-story-done">✓ Nobody changes anything any more: they agree. This is the plan.</p>' : "") +
+        `<div class="cbba-story-btns">${btn("prev", "◀")}${explain.on ? btn("pause", explain.paused ? "▶ Continue" : "⏸ Pause") : ""}${btn("next", "Next ▶")}` +
+        `${btn("fly", "Fly now ✈")}</div>`;
+    } else if (view === "plan" && last && last.result) {
+      const r = last.result;
+      html =
+        `<div class="cbba-story-title">${r.dispatch_allowed ? "✓ Plan agreed and safety-checked" : "✗ Plan blocked by the safety check"}</div>` +
+        `<ul>${r.plans.map((p) => `<li>${dot(p.drone_id)}${esc(p.drone_id)} → ${esc(p.path.map(cbbaShortName).join(" → ") || "nothing")}</li>`).join("")}</ul>` +
+        `<div class="cbba-story-btns">${steps.length ? btn("explain", "Show how they decided") : ""}${r.dispatch_allowed ? btn("fly", "Fly ✈") : ""}</div>`;
+    } else if (view === "sim" && sim.data) {
+      const d = sim.data;
+      const end = d.frames[d.frames.length - 1].t;
+      const frame = cbbaFrameAt(d.frames, sim.t);
+      const done = cbbaInspections(d.events).filter((i) => i.t <= sim.t);
+      const byDrone = {};
+      for (const i of done) byDrone[i.drone] = (byDrone[i.drone] || 0) + 1;
+      const deciding = frame.drones.some((x) => x.status === "planning" || x.status === "holding");
+      const recent = d.events.filter((e) => e.t <= sim.t).slice(-4).reverse();
+      const finished = sim.t >= end && !sim.running;
+      html =
+        `<div class="cbba-story-head">Flight (simulated) · t = ${Math.round(sim.t)} s · ${done.length} of ${state.points.length} places done</div>` +
+        (cameraBusy() ? '<div class="cbba-story-title">📷 Taking a picture - flight paused</div>' : deciding
+          ? '<div class="cbba-story-title">📡 The drones are deciding (orange lines = bids being sent)</div>'
+          : finished ? '<div class="cbba-story-title">✓ Mission finished</div>' : "") +
+        `<ul>${frame.drones.map((x) => `<li>${dot(x.id)}<b>${esc(x.id)}</b>: ${esc(CBBA_STATUS_TEXT[x.status] || x.status)} · battery ${Math.round(x.battery)}% · ${byDrone[x.id] || 0} place(s) done</li>`).join("")}</ul>` +
+        `<div class="cbba-story-head">What just happened</div>` +
+        `<ul class="cbba-story-events">${recent.map((e) => `<li>${dot(e.drone)}t=${e.t} s · ${esc(e.text)}</li>`).join("") || "<li>Starting…</li>"}</ul>`;
+    }
+    if (html === survey.storyKey) return;
+    survey.storyKey = html;
+    storyBox.innerHTML = html;
+    storyBox.style.display = html ? "" : "none";
   }
 
   function clearCamera() {
@@ -1386,6 +1577,7 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
     renderReplay();
     renderFailures();
     renderSim();
+    renderStory();
     $("btn-cbba-step-show").textContent = view === "replay" ? "Back to plan" : "Start replay";
   }
 

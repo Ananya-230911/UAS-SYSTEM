@@ -126,3 +126,26 @@ a number nobody detected proves nothing. Now:
   The webcam path is the perception service's existing
   `PERCEPTION_USE_WEBCAM=1` code, unit-tested with a fake camera; the
   first real test is on the operator's PC.
+
+## Story box: seeing how the drones decide (same day, operator feedback)
+
+The operator could not follow *how* the drones communicate and decide:
+the talking lasted about 3 seconds and only showed as lines; the
+round-by-round replay was hidden in section 3. Now a **story box on the
+map** (top-right) explains it in plain words:
+
+- After **Go**, before the flight, the CBBA rounds play automatically
+  (4.5 s per step; Pause / Next / ◀ / Fly now): "🧠 Thinking alone" -- each
+  drone's wanted places with its bids, dashed lines drone → place, red
+  places wanted by several drones; then "📡 Talking" -- orange lines
+  between drones, "S02 → D2 (bid 97); D1 (94), D3 (90) give it up",
+  and what each drone keeps. Last step: "they agree".
+- During the flight: each drone's status, battery and places done,
+  "📷 taking a picture", "📡 deciding", and the last events (inspected,
+  went silent, re-planned, back home).
+- The text comes from the server's existing trace and sim events
+  (`cbbaStepStory` in cbba.js, Node-tested); nothing new is computed in
+  the browser.
+
+Tests: gcs-web 28 passed; fleet-agent 558 passed, 1 skipped; browser run
+at Potheri: 10 explained steps, then flight, 12/12, no page errors.

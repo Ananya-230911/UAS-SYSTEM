@@ -214,3 +214,56 @@ test("first inspection of each point, in time order", () => {
 test("map view is kept inside valid coordinates", () => {
   assert.deepEqual(cbbaMapView(-95, -200, 95, 190), { south: -89.9, west: -180, north: 89.9, east: 180 });
 });
+
+// ---- story box ----
+const { cbbaStepStory, cbbaReplaySteps } = require("../cbba.js");
+
+const round1 = {
+  round: 1, links: [["D1", "D2"], ["D1", "D3"], ["D2", "D3"]], messages: 6,
+  wants: { D1: ["S01", "S02"], D2: ["S02", "S01"], D3: ["S04"] },
+  claims: { D1: ["S01"], D2: ["S02"], D3: ["S04"] },
+  events: [
+    { kind: "bid", drone: "D1", point: "S01", bid: 97.63 },
+    { kind: "bid", drone: "D1", point: "S02", bid: 94.03 },
+    { kind: "bid", drone: "D2", point: "S02", bid: 97.06 },
+    { kind: "bid", drone: "D2", point: "S01", bid: 90.05 },
+    { kind: "bid", drone: "D3", point: "S04", bid: 97.63 },
+    { kind: "dropped", drone: "D1", point: "S02", bid: 94.03, reason: "outbid", winner: "D2", winner_bid: 97.06 },
+    { kind: "dropped", drone: "D2", point: "S01", bid: 90.05, reason: "outbid", winner: "D1", winner_bid: 97.63 },
+    { kind: "dropped", drone: "D3", point: "S09", bid: null, reason: "after_lost" },
+  ],
+};
+
+test("story: thinking alone lists what each drone wants, with bids and conflicts", () => {
+  const [bid] = cbbaReplaySteps([round1]);
+  const st = cbbaStepStory(bid);
+  assert.equal(st.title, "Round 1 · 🧠 Thinking alone");
+  assert.deepEqual(st.lines.map((l) => l.text), [
+    "D1 wants 2 place(s): S01 (bid 98), S02 (bid 94)",
+    "D2 wants 2 place(s): S02 (bid 97), S01 (bid 90)",
+    "D3 wants 1 place(s): S04 (bid 98)",
+  ]);
+  assert.match(st.intro, /2 place\(s\) are wanted by more than one drone/);
+});
+
+test("story: talking says who won each place and who gave it up", () => {
+  const talk = cbbaReplaySteps([round1])[1];
+  const st = cbbaStepStory(talk);
+  assert.equal(st.title, "Round 1 · 📡 Talking");
+  assert.match(st.intro, /6 message\(s\) over 3 radio link\(s\)/);
+  assert.deepEqual(st.lines.map((l) => l.text), [
+    "S02 → D2 (bid 97); D1 (94) gives it up",
+    "S01 → D1 (bid 98); D2 (90) gives it up",
+    "D3 also lets go of S09 (they came after a place it lost)",
+  ]);
+  assert.equal(st.kept, "D1: S01 · D2: S02 · D3: S04");
+});
+
+test("story: a quiet round says nobody had to give anything up; long lists are cut", () => {
+  const quiet = { ...round1, events: [] };
+  assert.equal(cbbaStepStory(cbbaReplaySteps([quiet])[1]).lines[0].text, "No conflicts: nobody had to give anything up.");
+  const many = { ...round1, events: Array.from({ length: 9 }, (_, i) => ({ kind: "dropped", drone: "D1", point: `S${10 + i}`, bid: 50, reason: "outbid", winner: "D2", winner_bid: 60 })) };
+  const lines = cbbaStepStory(cbbaReplaySteps([many])[1], 6).lines;
+  assert.equal(lines.length, 7);
+  assert.equal(lines[6].text, "+ 3 more");
+});
