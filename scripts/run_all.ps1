@@ -15,6 +15,12 @@
     One-time setup (same shared venv every service uses):
         .venv\Scripts\pip.exe install -r services\api\requirements.txt -r services\telemetry-gateway\requirements.txt -r simulation\sitl\requirements.txt -r services\fleet-agent\requirements.txt
 
+.PARAMETER Webcam
+    Also start the perception service (YOLOv8) with this computer's
+    webcam, so the quick survey's drones take a real picture at each
+    place. Needs the one-time perception install:
+        .venv\Scripts\pip.exe install -r services\perception\requirements.txt
+
 .PARAMETER Count
 .PARAMETER HomeLat
 .PARAMETER HomeLon
@@ -26,9 +32,13 @@
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File scripts\run_all.ps1 -Count 5
+
+.EXAMPLE
+    powershell -ExecutionPolicy Bypass -File scripts\run_all.ps1 -Webcam
 #>
 
 param(
+    [switch]$Webcam,
     [int]$Count = 3,
     [double]$HomeLat = 37.4275,
     [double]$HomeLon = -122.1697
@@ -83,6 +93,19 @@ if (Test-Up "http://127.0.0.1:8020/health") {
     & (Join-Path $PSScriptRoot "run_cbba.ps1")
 }
 
+# --- 2b. Camera (perception service :8010), only with -Webcam
+if ($Webcam) {
+    if (Test-Up "http://127.0.0.1:8010/health") {
+        Write-Warning "Perception service already running on :8010 -- close its window first if it was not started with -Webcam."
+    } else {
+        try {
+            & (Join-Path $PSScriptRoot "run_perception.ps1") -Webcam
+        } catch {
+            Write-Warning "The camera service did not start: $($_.Exception.Message)"
+        }
+    }
+}
+
 # --- 3. The page itself, if nothing serves it yet (e.g. the API was already up)
 if (-not (Test-PortBusy 8080)) {
     Write-Host "Starting UI server on :8080..."
@@ -101,6 +124,9 @@ $checks = @(
     @{ Name = "CBBA server :8020  (Multi-drone panel)  "; Url = "http://127.0.0.1:8020/health"; Fix = "scripts\run_cbba.ps1 -- check its window for errors" },
     @{ Name = "Web page    :8080                       "; Url = "http://127.0.0.1:8080/"; Fix = "cd apps\gcs-web; ..\..\.venv\Scripts\python.exe -m http.server 8080" }
 )
+if ($Webcam) {
+    $checks += @{ Name = "Camera      :8010  (webcam + YOLOv8)     "; Url = "http://127.0.0.1:8010/health"; Fix = "scripts\run_perception.ps1 -Webcam -- check its window; one-time: .venv\Scripts\pip.exe install -r services\perception\requirements.txt" }
+}
 $allUp = $true
 foreach ($c in $checks) {
     if (Test-Up $c.Url) {

@@ -15,17 +15,18 @@ Scenario -- nothing else:
   - Who flies where is then CBBA + the safety gate, exactly as for a
     hand-made mission (app/cbba/service.py).
 
-It also answers "what did the camera see at this point" for the map:
-the perception service's YOLOv8 result if that service is running,
-otherwise clearly labelled made-up counts. Both are display only: a
-detection is shown to the operator and nothing reacts to it.
+It also answers "what did the camera see at this point" for the map: it
+asks the perception service to take a picture NOW (the webcam if that
+service runs with PERCEPTION_USE_WEBCAM=1) and run YOLOv8 on it, and
+returns the counts plus the picture with boxes. If no camera answers it
+says so -- it never makes up a result. Display only: a detection is shown
+to the operator and nothing reacts to it.
 
 Simulation only. Nothing here talks to a drone.
 """
 from __future__ import annotations
 
 import os
-import random
 from collections import Counter
 from typing import Literal
 
@@ -149,53 +150,50 @@ def plan_survey(req: SurveyRequest, provider=None) -> SurveyPlan:
 class CameraRequest(BaseModel):
     drone_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$")
     point_id: str = Field(min_length=1, max_length=64)
-    lat: float = Field(ge=-90, le=90)
-    lon: float = Field(ge=-180, le=180)
-    # auto: the perception service if it answers, else simulated.
-    source: Literal["auto", "simulated"] = "auto"
 
 
 class CameraResult(BaseModel):
     point_id: str
     drone_id: str
+    # "webcam": a live picture from the webcam, taken now. "sample photo":
+    # the perception service runs without the webcam. "unavailable": no
+    # camera answered -- counts is empty, nothing is guessed.
+    source: Literal["webcam", "sample photo", "unavailable"]
     counts: dict[str, int]
-    source: Literal["perception", "simulated"]
+    image: str | None = None  # data:image/jpeg;base64,... with the boxes drawn
     note: str
 
 
-# Made-up scene contents: (class, most per point). COCO class names, the
-# same vocabulary the perception service's YOLOv8 reports.
-_SIM_SCENE = [("person", 6), ("car", 4), ("bicycle", 2), ("motorcycle", 2), ("truck", 1), ("dog", 1)]
+START_CAMERA = r"powershell -ExecutionPolicy Bypass -File scripts\run_perception.ps1 -Webcam"
 
 
-def simulated_counts(lat: float, lon: float) -> dict[str, int]:
-    """Deterministic per location (same place, same answer), so a replay
-    shows the same thing. Not derived from any image."""
-    rng = random.Random(f"{lat:.5f},{lon:.5f}")
-    counts = {name: rng.randint(0, most) for name, most in _SIM_SCENE}
-    return {k: v for k, v in counts.items() if v}
-
-
-def camera_look(req: CameraRequest, http: httpx.Client | None = None, base_url: str = PERCEPTION_URL) -> CameraResult:
-    if req.source == "auto":
-        client = http or httpx.Client(timeout=httpx.Timeout(20.0, connect=2.0))
-        try:
-            resp = client.get(f"{base_url}/vehicles/{req.drone_id}/perception")
-            resp.raise_for_status()
-            body = resp.json()
-            counts = Counter(str(d["class_name"]) for d in body.get("detections", []))
-            return CameraResult(
-                point_id=req.point_id, drone_id=req.drone_id, counts=dict(counts), source="perception",
-                note=f"Real YOLOv8 detection by the perception service on frame '{body.get('frame', '?')}' "
-                "(a bundled sample photo, or your webcam if PERCEPTION_USE_WEBCAM=1) -- not a picture of this place.",
-            )
-        except (httpx.HTTPError, ValueError, KeyError, TypeError):
-            pass
-        finally:
-            if http is None:
-                client.close()
-    return CameraResult(
-        point_id=req.point_id, drone_id=req.drone_id, counts=simulated_counts(req.lat, req.lon), source="simulated",
-        note=f"Simulated camera: made-up counts for the demo (no perception service answered at {base_url}). No image was taken.",
-    )
-
+def camera_look(req: CameraRequest, http: httpx.Client | None = None, base_url: str | None = None) -> CameraResult:
+    """Ask the perception service for a picture taken now + YOLOv8 on it.
+    GET only. Never invents a result."""
+    base_url = base_url or PERCEPTION_URL
+    client = http or httpx.Client(timeout=httpx.Timeout(30.0, connect=2.0))
+    try:
+        resp = client.get(f"{base_url}/vehicles/{req.drone_id}/perception", params={"image": "true"})
+        resp.raise_for_status()
+        body = resp.json()
+        counts = dict(Counter(str(d["class_name"]) for d in body["detections"]))
+        source = "webcam" if body.get("camera") == "webcam" else "sample photo"
+        b64 = body.get("image_jpeg_b64")
+        note = (
+            "Live picture from your webcam, taken when the drone reached this place; real YOLOv8 detection."
+            if source == "webcam"
+            else "Real YOLOv8 detection, but on a bundled sample photo: the camera service was started without "
+            f"the webcam. For your webcam: {START_CAMERA}"
+        )
+        return CameraResult(
+            point_id=req.point_id, drone_id=req.drone_id, source=source, counts=counts,
+            image=f"data:image/jpeg;base64,{b64}" if b64 else None, note=note,
+        )
+    except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+        return CameraResult(
+            point_id=req.point_id, drone_id=req.drone_id, source="unavailable", counts={},
+            note=f"Camera not connected ({base_url}: {type(exc).__name__}). Start it with: {START_CAMERA}",
+        )
+    finally:
+        if http is None:
+            client.close()

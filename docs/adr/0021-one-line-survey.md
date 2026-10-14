@@ -29,7 +29,7 @@ Join the existing parts. Nothing new where something already did the job
 | Drones, fence | -- | `build_survey_scenario`: D1…Dn (1-8, default 3), camera, 100% battery, launch spots spread along the area's south edge; fence = area + 60 m |
 | Who goes where | CBBA + safety gate (`allocate`, `/missions/plan`) | -- |
 | Flight | Phase E `/sim/run` | `Frame.talk`: the (sender, receiver) of every CBBA bid message delivered in that tick |
-| Camera | `services/perception` `GET /vehicles/{id}/perception` (real YOLOv8 on its sample frame, or the webcam with `PERCEPTION_USE_WEBCAM=1`) | `POST /survey/camera`: counts per class; if the perception service does not answer, **labelled made-up counts** (deterministic per location) |
+| Camera | `services/perception` `GET /vehicles/{id}/perception` (webcam with `PERCEPTION_USE_WEBCAM=1`, i.e. `run_all.ps1 -Webcam`; real YOLOv8) | `?image=true` returns the picture with boxes from the same inference; `POST /survey/camera` returns counts + picture, or `unavailable` (see "Camera revision") |
 | Page | the panel's plan / sim / instruction code | "★ Quick survey" box, Go, orange "talk" lines, 📷 badges, camera list, summary |
 
 Endpoints (fleet-agent, :8020): `POST /survey/plan` (text + map view →
@@ -62,10 +62,9 @@ its points. Playback slows to at most 2x while any drone is deciding
 
 ## Honest limits
 
-- **The camera is not a camera over that place.** With the perception
-  service running, YOLOv8 really runs, but on its bundled sample photo
-  (or your webcam). Without it, counts are invented. The page says which
-  one, every time.
+- **The camera is this computer's webcam**, not a camera at the place on
+  the map (the drones are simulated). The page says which camera took
+  each picture.
 - **The talking is simulated** (in-process `LossyTransport`, as Phase E).
 - Survey points are grid-cell centres -- "look at this cell", not a full
   lawnmower sweep. `lawnmower_path` exists and could be used later.
@@ -74,6 +73,23 @@ its points. Playback slows to at most 2x while any drone is deciding
   mission setup.
 - Camera results are not stored (CBBA_PLAN.md §2C planned stored
   observations; they are only on the page for now).
+
+## Camera revision (same day, on the operator's feedback)
+
+The first version showed **made-up counts** (seeded random numbers) when
+the perception service was not running. The operator rejected that, rightly:
+a number nobody detected proves nothing. Now:
+
+- No invented result anywhere. Camera not running → the point shows
+  "📷 ✕ camera not connected" and the command to start it.
+- When a drone reaches a place, the browser playback **pauses**, the
+  perception service grabs a webcam frame **at that moment** and runs
+  YOLOv8 on it; the page shows that picture with the boxes drawn, the
+  counts, then the flight continues.
+- `scripts/run_perception.ps1 -Webcam` and `scripts/run_all.ps1 -Webcam`
+  start the camera service with the webcam.
+- Without `-Webcam` the service still works on its bundled sample photos,
+  and every result says "sample photo".
 
 ## Test results (sandbox, October 2026)
 
@@ -92,3 +108,21 @@ its points. Playback slows to at most 2x while any drone is deciding
   Mumbai: "attack this area" refused; 4 drones; "D2 is offline, S3 is
   high priority" → re-planned without D2, 16/16; D3 failed mid-flight →
   2 planning rounds, 16/16. No page errors.
+
+### After the camera revision
+
+- `services/fleet-agent`: 557 passed, 1 skipped. Camera tests: live
+  webcam answer, sample-photo answer, camera down → `unavailable` with
+  empty counts (nothing invented).
+- `services/perception`: 34 passed, with the real YOLOv8n model (weights
+  downloaded) -- including the new `image=true` picture.
+- `apps/gcs-web`: 25 passed.
+- Browser, real perception service running (sample photos -- this sandbox
+  has no webcam): Delhi, 3 drones, 12/12 places photographed; the flight
+  clock stayed still while pictures were taken; each point showed the
+  real picture with YOLOv8's boxes (e.g. "3 people, 1 bus"). With no
+  camera service: 12 × "camera not connected", no numbers.
+- **Not tested here: a real webcam** (no camera device in the sandbox).
+  The webcam path is the perception service's existing
+  `PERCEPTION_USE_WEBCAM=1` code, unit-tested with a fake camera; the
+  first real test is on the operator's PC.

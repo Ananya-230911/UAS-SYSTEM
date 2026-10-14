@@ -86,10 +86,12 @@ each other bids); the safety gate checks the plan; the drones fly it
 (Phase E); each point gets a 📷 camera result and a summary at the end.
 "Tell the drones" and "Make this drone fail now" still work on it.
 The AI (Groq, or the built-in rules) only reads *how many drones* and *what
-altitude* -- positions come from the map, routes from CBBA. Camera: real
-YOLOv8 from `services/perception` if it is running (on its sample photo or
-your webcam -- not a picture of that place), otherwise labelled made-up
-counts. Server: `app/survey.py`, `POST /survey/plan`, `POST /survey/camera`.
+altitude* -- positions come from the map, routes from CBBA. Camera: when a
+drone reaches a place the playback pauses, `services/perception` takes a
+picture right then from your webcam (start with `scripts\run_all.ps1
+-Webcam`) and runs YOLOv8; the page shows the picture with boxes and the
+counts. No camera running -> "camera not connected"; nothing is made up.
+Server: `app/survey.py`, `POST /survey/plan`, `POST /survey/camera`.
 See `docs/adr/0021-one-line-survey.md`.
 
 ## Live agents (Phase E)

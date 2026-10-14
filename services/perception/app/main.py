@@ -9,6 +9,7 @@ or API key scheme as the rest of the stack if that's ever needed -- see
 the ADR's known limitations), and no persistence: every response is
 computed fresh from the current simulated camera frame/LiDAR scan.
 """
+import base64
 import time
 
 from fastapi import FastAPI
@@ -35,26 +36,38 @@ def health() -> dict:
     return {"status": "ok"}
 
 
-def _run_perception(vehicle_id: str) -> dict:
+def _run_perception(vehicle_id: str, with_image: bool = False) -> dict:
     """Shared by both endpoints below: run detection + obstacle-finding
     once per call so a single /decision request doesn't silently run
     inference twice."""
     frame_path = camera.current_frame_path(vehicle_id)
-    detections = detection.detect_objects(frame_path)
+    detections, image = detection.detect_objects_with_image(frame_path, with_image=with_image)
     tick = int(time.time())
     scan = lidar.current_scan(vehicle_id, tick)
     obstacles = obstacle.find_obstacles(scan)
-    return {"frame": frame_path.name, "detections": detections, "lidar_obstacles": obstacles}
+    out = {
+        "frame": frame_path.name,
+        # Where the picture came from: the real webcam (PERCEPTION_USE_WEBCAM=1)
+        # or one of the bundled sample photos.
+        "camera": "webcam" if camera.USE_WEBCAM else "sample photo",
+        "detections": detections,
+        "lidar_obstacles": obstacles,
+    }
+    if with_image:
+        out["image_jpeg_b64"] = base64.b64encode(image).decode("ascii") if image else None
+    return out
 
 
 @app.get("/vehicles/{vehicle_id}/perception")
-def get_perception(vehicle_id: str) -> dict:
-    """Camera detections (real YOLOv8n inference on the current
-    simulated frame) + LiDAR obstacle readings (simulated scan, real
-    distance-threshold analysis). No recommendation here -- that's
+def get_perception(vehicle_id: str, image: bool = False) -> dict:
+    """Camera detections (real YOLOv8n inference on the current frame:
+    the webcam if PERCEPTION_USE_WEBCAM=1, else a bundled sample photo)
+    + LiDAR obstacle readings (simulated scan, real distance-threshold
+    analysis). image=true also returns that frame as a JPEG with the
+    detection boxes drawn on it. No recommendation here -- that's
     /decision below, which also needs telemetry context this endpoint
     doesn't require."""
-    result = _run_perception(vehicle_id)
+    result = _run_perception(vehicle_id, with_image=image)
     return {"vehicle_id": vehicle_id, **result}
 
 

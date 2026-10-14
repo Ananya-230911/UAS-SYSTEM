@@ -359,7 +359,8 @@ class Transport(Protocol):
   reasons, the "sim" label. **Done**, plus the one-line survey
   (`app/survey.py`, `/survey/plan`, `/survey/camera`; ADR-0021), which
   also builds a first, display-only version of §2C (camera results from
-  the perception service, or labelled simulated counts; not stored yet).
+  the perception service: a webcam picture taken when the drone reaches
+  the place + YOLOv8, or "camera not connected"; not stored yet).
 - **G — Scenario tests:** end-to-end scripted scenarios (nominal, drone
   loss, comms cut, low battery, fence change), with real run output
   reported.

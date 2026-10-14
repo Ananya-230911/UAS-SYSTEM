@@ -193,9 +193,10 @@ def survey_plan(req: SurveyRequest) -> dict:
 
 @app.post("/survey/camera", response_model=CameraResult)
 def survey_camera(req: CameraRequest) -> CameraResult:
-    """What the camera saw when a drone inspected a point: the perception
-    service's YOLOv8 result if it is running (GET only), otherwise
-    labelled made-up counts. Display only -- nothing reacts to it."""
+    """What the camera sees when a drone reaches a point: asks the
+    perception service (GET only) for a picture taken now -- the webcam
+    if it runs with PERCEPTION_USE_WEBCAM=1 -- and YOLOv8 on it. If no
+    camera answers, says so; nothing is made up. Display only."""
     return camera_look(req)
 
 

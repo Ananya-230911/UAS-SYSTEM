@@ -32,10 +32,29 @@ def _get_model():
 def detect_objects(frame_path, confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD) -> list[dict]:
     """Returns [{"class_name": str, "confidence": float, "bbox": {...}}, ...]
     for every detection at or above confidence_threshold."""
+    return detect_objects_with_image(frame_path, confidence_threshold, with_image=False)[0]
+
+
+def detect_objects_with_image(
+    frame_path, confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD, with_image: bool = True, max_width: int = 480
+) -> tuple[list[dict], bytes | None]:
+    """Same detections as detect_objects() from ONE inference, plus (if
+    with_image) the frame as a JPEG with those boxes drawn on it, scaled
+    down to max_width -- so the operator sees exactly what was detected."""
     model = _get_model()
-    results = model(str(frame_path), verbose=False)
+    results = model(str(frame_path), verbose=False, conf=confidence_threshold)
     detections = []
+    image = None
     for r in results:
+        if with_image and image is None:
+            import cv2  # opencv-python is already a dependency (ultralytics needs it too)
+
+            plotted = r.plot()  # BGR array with boxes + labels
+            h, w = plotted.shape[:2]
+            if w > max_width:
+                plotted = cv2.resize(plotted, (max_width, round(h * max_width / w)))
+            ok, buf = cv2.imencode(".jpg", plotted, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            image = buf.tobytes() if ok else None
         for box in r.boxes:
             conf = float(box.conf[0])
             if conf < confidence_threshold:
@@ -49,4 +68,4 @@ def detect_objects(frame_path, confidence_threshold: float = DEFAULT_CONFIDENCE_
                     "bbox": {"x1": round(x1, 1), "y1": round(y1, 1), "x2": round(x2, 1), "y2": round(y2, 1)},
                 }
             )
-    return detections
+    return detections, image

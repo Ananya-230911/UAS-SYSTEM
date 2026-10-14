@@ -99,8 +99,11 @@
         <p class="hint">
           1. Search any place above the map (or just move the map there).
           2. Type one line and press Go. The drones split the area on your
-          screen, talk to each other to decide who goes where, fly it, and
-          report what their camera sees. Simulation only.
+          screen, talk to each other to decide who goes where and fly it
+          (simulated). When a drone reaches a place, the flight pauses, the
+          camera takes a picture right then and YOLOv8 detects what is in
+          it. Camera = this computer's webcam: start with
+          <code>scripts\run_all.ps1 -Webcam</code>.
         </p>
         <textarea id="cbba-survey-text" rows="2" placeholder="e.g. 3 drones survey this area"></textarea>
         <div class="button-row">
@@ -112,7 +115,7 @@
         </div>
         <p class="cbba-line cbba-muted cbba-legend">
           On the map: <span class="cbba-key cbba-key--talk"></span> drones sending bids to each other (deciding who does what) ·
-          <span class="cbba-key cbba-key--radio"></span> radio link · 📷 what the camera saw (hover it).
+          <span class="cbba-key cbba-key--radio"></span> radio link · 📷 picture taken there (number = things detected; hover it).
         </p>
         <div id="cbba-survey-output" class="perception-panel"></div>
       </section>

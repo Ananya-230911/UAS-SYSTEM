@@ -20,9 +20,20 @@
     ~6MB YOLOv8n model weights (cached afterward in
     services\perception\.models\, gitignored -- a build artifact).
 
+    -Webcam takes every picture from this computer's webcam, live, at the
+    moment it is asked for (PERCEPTION_USE_WEBCAM=1). Without it, the
+    bundled sample photos are used.
+
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File scripts\run_perception.ps1
+
+.EXAMPLE
+    powershell -ExecutionPolicy Bypass -File scripts\run_perception.ps1 -Webcam
 #>
+
+param(
+    [switch]$Webcam
+)
 
 $ErrorActionPreference = "Stop"
 
@@ -33,10 +44,11 @@ if (-not (Test-Path $venvPython)) {
     throw "Couldn't find $venvPython -- create the venv first (see README's Quick Start on Windows)."
 }
 
-Write-Host "Starting Perception & AI Decision service..."
+$webcamEnv = if ($Webcam) { "`$env:PERCEPTION_USE_WEBCAM = '1'; " } else { "" }
+Write-Host ("Starting Perception & AI Decision service" + $(if ($Webcam) { " (camera: this computer's webcam)..." } else { " (camera: sample photos)..." }))
 Start-Process powershell -ArgumentList @(
     "-NoExit", "-Command",
-    "cd '$root\services\perception'; `$env:PYTHONPATH = '.'; & '$venvPython' -m uvicorn app.main:app --host 0.0.0.0 --port 8010"
+    "cd '$root\services\perception'; `$env:PYTHONPATH = '.'; $webcamEnv& '$venvPython' -m uvicorn app.main:app --host 0.0.0.0 --port 8010"
 )
 
 $deadline = (Get-Date).AddSeconds(30)

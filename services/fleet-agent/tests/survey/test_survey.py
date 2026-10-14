@@ -12,8 +12,7 @@ from app.server import app
 from app.sim.models import FailureEvent
 from app.sim.world import run_simulation
 from app.survey import (
-    MAX_SIDE_M, CameraRequest, MapView, SurveyRequest, build_survey_scenario, camera_look, plan_survey,
-    simulated_counts, survey_box,
+    MAX_SIDE_M, CameraRequest, MapView, SurveyRequest, build_survey_scenario, camera_look, plan_survey, survey_box,
 )
 
 client = TestClient(app)
@@ -149,39 +148,53 @@ def test_instructions_work_on_a_survey_mission():
 
 
 # --- camera -------------------------------------------------------------------------
+# No made-up results anywhere: either a real picture + YOLOv8, or "unavailable".
 
 def _req(**kw):
-    return CameraRequest(**{"drone_id": "D1", "point_id": "S01", "lat": 28.61, "lon": 77.2, **kw})
+    return CameraRequest(**{"drone_id": "D1", "point_id": "S01", **kw})
 
 
-def test_camera_uses_the_perception_service_when_it_answers():
+def _perception(camera="webcam", detections=("person", "person", "cup")):
     seen = []
 
     def handler(request):
-        seen.append((request.method, request.url.path))
-        return httpx.Response(200, json={"frame": "frame_a.jpg", "detections": [
-            {"class_name": "person"}, {"class_name": "person"}, {"class_name": "car"}]})
+        seen.append((request.method, request.url.path, dict(request.url.params)))
+        return httpx.Response(200, json={"frame": "webcam_frame.jpg", "camera": camera, "image_jpeg_b64": "SU1H",
+                                         "detections": [{"class_name": c} for c in detections]})
 
-    r = camera_look(_req(), http=httpx.Client(transport=httpx.MockTransport(handler)))
-    assert r.source == "perception" and r.counts == {"person": 2, "car": 1}
-    assert "frame_a.jpg" in r.note and "not a picture of this place" in r.note
-    assert seen == [("GET", "/vehicles/D1/perception")]   # read only
+    return httpx.Client(transport=httpx.MockTransport(handler)), seen
 
 
-def test_camera_falls_back_to_labelled_simulation():
+def test_camera_takes_a_live_webcam_picture():
+    http, seen = _perception()
+    r = camera_look(_req(), http=http)
+    assert r.source == "webcam" and r.counts == {"person": 2, "cup": 1}
+    assert r.image == "data:image/jpeg;base64,SU1H" and "Live picture from your webcam" in r.note
+    assert seen == [("GET", "/vehicles/D1/perception", {"image": "true"})]   # read only, picture requested
+
+
+def test_camera_says_when_it_is_a_sample_photo():
+    http, _ = _perception(camera="sample photo", detections=())
+    r = camera_look(_req(), http=http)
+    assert r.source == "sample photo" and r.counts == {} and "-Webcam" in r.note
+
+
+def test_camera_not_connected_invents_nothing():
     def down(request):
         raise httpx.ConnectError("refused")
 
     r = camera_look(_req(), http=httpx.Client(transport=httpx.MockTransport(down)))
-    assert r.source == "simulated" and "made-up" in r.note
-    assert r.counts == simulated_counts(28.61, 77.2)
-    assert simulated_counts(28.61, 77.2) == simulated_counts(28.61, 77.2)   # same place, same answer
+    assert r.source == "unavailable" and r.counts == {} and r.image is None
+    assert "Camera not connected" in r.note and "run_perception.ps1 -Webcam" in r.note
 
 
-def test_camera_endpoint_simulated():
-    body = client.post("/survey/camera", json={"drone_id": "D1", "point_id": "S01", "lat": 19.07, "lon": 72.87, "source": "simulated"}).json()
-    assert body["source"] == "simulated" and body["point_id"] == "S01"
-    assert client.post("/survey/camera", json={"drone_id": "../x", "point_id": "S01", "lat": 0, "lon": 0}).status_code == 422
+def test_camera_endpoint_without_a_camera_service(monkeypatch):
+    import app.survey as survey_mod
+
+    monkeypatch.setattr(survey_mod, "PERCEPTION_URL", "http://127.0.0.1:9")   # nothing listens there
+    body = client.post("/survey/camera", json={"drone_id": "D1", "point_id": "S01"}).json()
+    assert body["source"] == "unavailable" and body["counts"] == {}
+    assert client.post("/survey/camera", json={"drone_id": "../x", "point_id": "S01"}).status_code == 422
 
 
 def test_survey_endpoint():

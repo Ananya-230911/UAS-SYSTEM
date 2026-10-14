@@ -38,3 +38,25 @@ def test_decision_endpoint_defaults_are_safe_when_query_params_omitted():
     resp = client.get("/vehicles/sim-1/decision")
     assert resp.status_code == 200
     assert resp.json()["recommendation"]["action"] in {"CONTINUE", "HOLD", "DIVERT", "RTL"}
+
+
+def test_perception_can_return_the_picture_with_boxes(monkeypatch):
+    """image=true: the same single inference also returns the frame as a
+    JPEG with the boxes drawn, and says which camera took it."""
+    import base64
+
+    from app import detection
+
+    calls = []
+
+    def fake(frame_path, confidence_threshold=detection.DEFAULT_CONFIDENCE_THRESHOLD, with_image=True, max_width=480):
+        calls.append(with_image)
+        return [{"class_name": "person", "confidence": 0.9, "bbox": {"x1": 0, "y1": 0, "x2": 1, "y2": 1}}], b"JPEGBYTES"
+
+    monkeypatch.setattr(detection, "detect_objects_with_image", fake)
+    body = client.get("/vehicles/D1/perception", params={"image": "true"}).json()
+    assert body["camera"] in {"webcam", "sample photo"}
+    assert base64.b64decode(body["image_jpeg_b64"]) == b"JPEGBYTES"
+    assert body["detections"][0]["class_name"] == "person"
+    plain = client.get("/vehicles/D1/perception").json()
+    assert "image_jpeg_b64" not in plain and calls == [True, False]   # one inference per request
