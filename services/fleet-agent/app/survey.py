@@ -189,6 +189,18 @@ def camera_look(req: CameraRequest, http: httpx.Client | None = None, base_url: 
             point_id=req.point_id, drone_id=req.drone_id, source=source, counts=counts,
             image=f"data:image/jpeg;base64,{b64}" if b64 else None, note=note,
         )
+    except httpx.HTTPStatusError as exc:
+        # The camera service is running but could not take the picture
+        # (no webcam, webcam busy, YOLO not installed ...): show its reason.
+        try:
+            why = exc.response.json().get("detail", "")
+        except ValueError:
+            why = exc.response.text[:200]
+        return CameraResult(
+            point_id=req.point_id, drone_id=req.drone_id, source="unavailable", counts={},
+            note=f"The camera service answered with error {exc.response.status_code}: {why or 'no details'}. "
+            "Check the camera service window.",
+        )
     except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
         return CameraResult(
             point_id=req.point_id, drone_id=req.drone_id, source="unavailable", counts={},

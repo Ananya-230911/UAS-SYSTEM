@@ -10,9 +10,10 @@ the ADR's known limitations), and no persistence: every response is
 computed fresh from the current simulated camera frame/LiDAR scan.
 """
 import base64
+import threading
 import time
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import camera, decision as decision_module, detection, lidar, obstacle
@@ -36,12 +37,20 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+# One picture at a time: FastAPI runs these endpoints in parallel threads,
+# but a webcam (and the one shared webcam_frame.jpg it is saved to) can
+# only serve one capture at a time. Two drones reaching places in the same
+# second used to make both captures fail.
+_capture_lock = threading.Lock()
+
+
 def _run_perception(vehicle_id: str, with_image: bool = False) -> dict:
     """Shared by both endpoints below: run detection + obstacle-finding
     once per call so a single /decision request doesn't silently run
     inference twice."""
-    frame_path = camera.current_frame_path(vehicle_id)
-    detections, image = detection.detect_objects_with_image(frame_path, with_image=with_image)
+    with _capture_lock:
+        frame_path = camera.current_frame_path(vehicle_id)
+        detections, image = detection.detect_objects_with_image(frame_path, with_image=with_image)
     tick = int(time.time())
     scan = lidar.current_scan(vehicle_id, tick)
     obstacles = obstacle.find_obstacles(scan)
@@ -67,7 +76,12 @@ def get_perception(vehicle_id: str, image: bool = False) -> dict:
     detection boxes drawn on it. No recommendation here -- that's
     /decision below, which also needs telemetry context this endpoint
     doesn't require."""
-    result = _run_perception(vehicle_id, with_image=image)
+    try:
+        result = _run_perception(vehicle_id, with_image=image)
+    except (RuntimeError, FileNotFoundError, ImportError) as exc:
+        # Say what is wrong (no webcam, webcam busy, ultralytics not
+        # installed ...) instead of a bare "Internal Server Error".
+        raise HTTPException(status_code=503, detail=f"{type(exc).__name__}: {exc}") from exc
     return {"vehicle_id": vehicle_id, **result}
 
 

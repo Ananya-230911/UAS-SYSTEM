@@ -188,6 +188,15 @@ def test_camera_not_connected_invents_nothing():
     assert "Camera not connected" in r.note and "run_perception.ps1 -Webcam" in r.note
 
 
+def test_camera_error_shows_the_reason():
+    def busy(request):
+        return httpx.Response(503, json={"detail": "RuntimeError: failed to read a frame from the webcam"})
+
+    r = camera_look(_req(), http=httpx.Client(transport=httpx.MockTransport(busy)))
+    assert r.source == "unavailable" and r.counts == {}
+    assert "error 503" in r.note and "failed to read a frame from the webcam" in r.note
+
+
 def test_camera_endpoint_without_a_camera_service(monkeypatch):
     import app.survey as survey_mod
 

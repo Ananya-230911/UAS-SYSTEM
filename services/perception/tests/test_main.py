@@ -60,3 +60,42 @@ def test_perception_can_return_the_picture_with_boxes(monkeypatch):
     assert body["detections"][0]["class_name"] == "person"
     plain = client.get("/vehicles/D1/perception").json()
     assert "image_jpeg_b64" not in plain and calls == [True, False]   # one inference per request
+
+
+def test_camera_problem_is_explained_not_a_bare_500(monkeypatch):
+    from app import camera
+
+    def no_webcam(vehicle_id):
+        raise RuntimeError("PERCEPTION_USE_WEBCAM=1 but no webcam could be opened (device 0)")
+
+    monkeypatch.setattr(camera, "current_frame_path", no_webcam)
+    resp = client.get("/vehicles/D1/perception", params={"image": "true"})
+    assert resp.status_code == 503 and "no webcam could be opened" in resp.json()["detail"]
+
+
+def test_two_pictures_at_the_same_moment_take_turns(monkeypatch):
+    """Two drones reaching places in the same second: both captures must
+    succeed. The fake webcam fails if it is used by two threads at once,
+    like a real one."""
+    import threading
+    import time as _time
+    from concurrent.futures import ThreadPoolExecutor
+
+    from app import camera, detection
+
+    busy = threading.Lock()
+
+    def webcam(vehicle_id):
+        if not busy.acquire(blocking=False):
+            raise RuntimeError("failed to read a frame from the webcam")
+        try:
+            _time.sleep(0.05)
+            return camera.available_frames()[0]
+        finally:
+            busy.release()
+
+    monkeypatch.setattr(camera, "current_frame_path", webcam)
+    monkeypatch.setattr(detection, "detect_objects_with_image", lambda *a, **k: ([], b"J"))
+    with ThreadPoolExecutor(4) as pool:
+        codes = list(pool.map(lambda d: client.get(f"/vehicles/{d}/perception", params={"image": "true"}).status_code, ["D1", "D2", "D3", "D4"]))
+    assert codes == [200, 200, 200, 200]
