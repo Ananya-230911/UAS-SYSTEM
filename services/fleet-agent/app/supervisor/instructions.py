@@ -82,14 +82,21 @@ def _find_ids(segment: str, ids: list[str]) -> list[str]:
     return found
 
 
+def _unpad(name: str) -> str:
+    """"P04" -> "P4" (drop leading zeros of the number)."""
+    return re.sub(r"(?<=[A-Za-z])0+(?=\d)", "", name)
+
+
 def _id_aliases(point_ids: list[str]) -> dict[str, str]:
-    """Let the operator write "P04" for "P04-solar-panels"."""
-    aliases = {}
+    """Let the operator write "P04" or "P4" for "P04-solar-panels"."""
+    candidates: dict[str, list[str]] = {}
     for pid in point_ids:
         short = pid.split("-")[0]
-        if short != pid and sum(1 for q in point_ids if q.split("-")[0] == short) == 1:
-            aliases[short] = pid
-    return aliases
+        for name in {short, _unpad(short)}:
+            if pid not in candidates.setdefault(name, []):
+                candidates[name].append(pid)
+    lowered = {p.lower() for p in point_ids}
+    return {name: pids[0] for name, pids in candidates.items() if len(pids) == 1 and name.lower() not in lowered}
 
 
 class RuleBasedInstructionParser:

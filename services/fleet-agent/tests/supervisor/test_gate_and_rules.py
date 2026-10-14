@@ -42,6 +42,20 @@ def test_short_names_minutes_any_drone_skip_back_replan():
     assert kinds("P07 no deadline") == [("set_deadline", "P07-pipeline-b", None)]
 
 
+def test_numbers_without_leading_zero():
+    # The exact sentence an operator typed in the GCS: "P3" means P03.
+    assert kinds("P3 is high priority, skip P5, sim-2 is offline") == [
+        ("set_priority", "P03-tower", "high"),
+        ("skip_point", "P05-fence-east", None),
+        ("exclude_drone", "sim-2", None),
+    ]
+    # Same when the places are named just "P03", "P05" (as the page names them).
+    sc = sample_scenario()
+    sc = sc.model_copy(update={"points": [p.model_copy(update={"point_id": p.point_id.split("-")[0]}) for p in sc.points]})
+    assert kinds("P3 is high priority, skip P5", sc) == [("set_priority", "P03", "high"), ("skip_point", "P05", None)]
+    assert kinds("P1 within 1 minute", sc) == [("set_deadline", "P01", 60.0)]  # P1 is P01, not P10/P11
+
+
 def test_p1_is_not_confused_with_p10():
     sc = sample_scenario()
     sc = sc.model_copy(update={"points": [p.model_copy(update={"point_id": pid}) for p, pid in zip(sc.points[:2], ["P1", "P10"])]})
