@@ -8,8 +8,9 @@ draw it, keeps every planned version in memory (app/store.py), and turns
 operator instructions into checked change requests (app/supervisor/). It
 sends no commands and talks to no drone or gateway. The only outside call
 it can make is to Groq, and only when GROQ_API_KEY is set -- to interpret
-an instruction, never to plan or check safety. services/api is not
-touched.
+an instruction, never to plan or check safety. It may also READ (GET)
+services/api's fleet state and the perception service's detections, for
+display. services/api is not changed.
 """
 from __future__ import annotations
 
@@ -25,6 +26,7 @@ from app.cbba.service import allocate
 from app.llm.groq import groq_configured
 from app.mission.goal_parser import NeedsClarification
 from app.store import InMemoryMissionStore, MissionStore, Source
+from app.survey import CameraRequest, CameraResult, SurveyRequest, camera_look, plan_survey
 from app.supervisor.gate import IntentGate
 from app.supervisor.instructions import RuleBasedInstructionParser, interpret_instruction
 from app.sim.models import SimRequest, SimResult
@@ -174,6 +176,27 @@ def cbba_instruct(req: InstructRequest) -> dict:
         "rejected": [{"change": it.describe(), "reason": why, "intent": it.model_dump()} for it, why in decision.rejected],
         "scenario": decision.scenario.model_dump(mode="json") if decision.changed else None,
     }
+
+
+@app.post("/survey/plan")
+def survey_plan(req: SurveyRequest) -> dict:
+    """Phase F: one line ("3 drones survey this area") + the map area on
+    screen -> a survey mission (drones, survey points, fence). Nothing is
+    planned yet: the page then runs it through /missions/plan (CBBA +
+    safety gate) like any other mission."""
+    try:
+        plan = plan_survey(req)
+    except NeedsClarification as exc:
+        return {"question": exc.question, "provider": None, "scenario": None, "area": None}
+    return {"question": None, "provider": plan.provider, "scenario": plan.scenario.model_dump(mode="json"), "area": plan.area}
+
+
+@app.post("/survey/camera", response_model=CameraResult)
+def survey_camera(req: CameraRequest) -> CameraResult:
+    """What the camera saw when a drone inspected a point: the perception
+    service's YOLOv8 result if it is running (GET only), otherwise
+    labelled made-up counts. Display only -- nothing reacts to it."""
+    return camera_look(req)
 
 
 @app.post("/sim/run", response_model=SimResult)

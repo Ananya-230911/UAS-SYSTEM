@@ -94,6 +94,29 @@
 
       <h3 class="panel-group-label">Multi-drone (simulation)</h3>
 
+      <section class="section-cbba section-survey">
+        <h2>★ Quick survey (one line)</h2>
+        <p class="hint">
+          1. Search any place above the map (or just move the map there).
+          2. Type one line and press Go. The drones split the area on your
+          screen, talk to each other to decide who goes where, fly it, and
+          report what their camera sees. Simulation only.
+        </p>
+        <textarea id="cbba-survey-text" rows="2" placeholder="e.g. 3 drones survey this area"></textarea>
+        <div class="button-row">
+          <select id="cbba-survey-engine" aria-label="who reads the line">
+            <option value="auto">Groq if set up, else rules</option>
+            <option value="rules">Built-in rules only</option>
+          </select>
+          <button id="btn-cbba-survey-go">Go</button>
+        </div>
+        <p class="cbba-line cbba-muted cbba-legend">
+          On the map: <span class="cbba-key cbba-key--talk"></span> drones sending bids to each other (deciding who does what) ·
+          <span class="cbba-key cbba-key--radio"></span> radio link · 📷 what the camera saw (hover it).
+        </p>
+        <div id="cbba-survey-output" class="perception-panel"></div>
+      </section>
+
       <section class="section-cbba">
         <h2>1 · Mission setup</h2>
         <p class="hint">

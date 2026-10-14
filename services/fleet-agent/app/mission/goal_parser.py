@@ -76,7 +76,8 @@ class GoalParserProvider(Protocol):
 
 _INTENT_WORDS = re.compile(
     r"\b(search\w*|survey\w*|scan\w*|cover\w*|sweep\w*|recon\w*|reconnaissance|inspect\w*|"
-    r"patrol\w*|explore\w*|map(?:ping)?|look\s+for|find)\b",
+    r"patrol\w*|explore\w*|map(?:ping)?|look\s+for|find|check\w*|monitor\w*|observ\w*|"
+    r"look\s+(?:at|over|around)|see\s+what)\b",
     re.IGNORECASE,
 )
 _NUMBER_WORDS = {
@@ -222,15 +223,10 @@ class GoalParseResult:
     provider: str  # which parser actually produced the result, incl. any fallback
 
 
-def parse_goal(
-    text: str,
-    available_vehicle_ids: list[str],
-    search_area: SearchArea | None,
-    default_altitude_m: float = 20.0,
-    provider: GoalParserProvider | None = None,
-) -> GoalParseResult:
-    """Turn operator text into a validated MissionRequest, or raise
-    NeedsClarification with the question to ask instead."""
+def interpret_goal(text: str, provider: GoalParserProvider | None = None) -> tuple[ParsedGoal, str]:
+    """Operator text -> (an area_search ParsedGoal, which parser produced
+    it), or NeedsClarification. Shared by parse_goal() and the one-line
+    survey (app/survey.py): scope refusal, provider + rules fallback."""
     text = text.strip()
     if not text:
         raise NeedsClarification(UNCLEAR_QUESTION)
@@ -263,6 +259,20 @@ def parse_goal(
 
     if parsed.intent != "area_search":
         raise NeedsClarification(parsed.clarifying_question or UNCLEAR_QUESTION)
+    return parsed, provider_name
+
+
+def parse_goal(
+    text: str,
+    available_vehicle_ids: list[str],
+    search_area: SearchArea | None,
+    default_altitude_m: float = 20.0,
+    provider: GoalParserProvider | None = None,
+) -> GoalParseResult:
+    """Turn operator text into a validated MissionRequest, or raise
+    NeedsClarification with the question to ask instead."""
+    text = text.strip()
+    parsed, provider_name = interpret_goal(text, provider)
 
     if search_area is None:
         raise NeedsClarification(

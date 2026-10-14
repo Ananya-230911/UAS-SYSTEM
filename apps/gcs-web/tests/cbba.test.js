@@ -173,3 +173,44 @@ test("an instruction's checked scenario updates only allowed fields in the edito
   assert.equal(out.radioMode, "range");
   assert.equal(out.missionId, "M-1");
 });
+
+// ---- quick survey (Phase F) ----
+const { cbbaCountsText, cbbaSumCounts, cbbaTalkAt, cbbaInspections, cbbaMapView } = require("../cbba.js");
+
+test("camera counts read as plain English, largest first", () => {
+  assert.equal(cbbaCountsText({ car: 2, person: 4, dog: 1 }), "4 people, 2 cars, 1 dog");
+  assert.equal(cbbaCountsText({ person: 1, bus: 3 }), "3 buses, 1 person");
+  assert.equal(cbbaCountsText({}), "nothing detected");
+  assert.deepEqual(cbbaSumCounts([{ car: 1 }, { car: 2, person: 1 }, null]), { car: 3, person: 1 });
+});
+
+test("talk lines: bid messages from the last 2 s, each pair once", () => {
+  const frames = [
+    { t: 0, talk: [] },
+    { t: 1, talk: [["D1", "D2"], ["D2", "D1"]] },
+    { t: 2, talk: [["D2", "D3"]] },
+    { t: 3, talk: [] },
+    { t: 9, talk: [] },
+  ];
+  assert.deepEqual(cbbaTalkAt(frames, 2), [["D1", "D2"], ["D2", "D3"]]);
+  assert.deepEqual(cbbaTalkAt(frames, 3), [["D2", "D3"]]);
+  assert.deepEqual(cbbaTalkAt(frames, 9), []);
+  assert.deepEqual(cbbaTalkAt([{ t: 1 }], 1), []); // older servers send no talk
+});
+
+test("first inspection of each point, in time order", () => {
+  const events = [
+    { t: 5, kind: "plan", drone: null, text: "Plan agreed." },
+    { t: 40, kind: "inspect", drone: "D2", text: "D2 inspected S04." },
+    { t: 55, kind: "inspect", drone: "D1", text: "D1 inspected S01 (hovered 0 s)." },
+    { t: 60, kind: "inspect", drone: "D3", text: "D3 inspected S04." },
+  ];
+  assert.deepEqual(cbbaInspections(events), [
+    { point: "S04", drone: "D2", t: 40 },
+    { point: "S01", drone: "D1", t: 55 },
+  ]);
+});
+
+test("map view is kept inside valid coordinates", () => {
+  assert.deepEqual(cbbaMapView(-95, -200, 95, 190), { south: -89.9, west: -180, north: 89.9, east: 180 });
+});

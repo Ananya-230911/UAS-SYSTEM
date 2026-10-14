@@ -53,6 +53,9 @@ class Frame(BaseModel):
     drones: list[DroneFrame]
     inspected: list[str]
     links: list[tuple[str, str]]
+    # (sender, receiver) of every CBBA bid message delivered this tick --
+    # the drones negotiating who does what. Heartbeats are not listed.
+    talk: list[tuple[str, str]] = Field(default_factory=list)
 
 
 class SimEvent(BaseModel):

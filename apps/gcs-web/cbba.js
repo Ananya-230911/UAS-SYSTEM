@@ -298,12 +298,74 @@ function cbbaShortName(pointId) {
   return String(pointId).split("-")[0];
 }
 
+// ---- quick survey (Phase F) ---------------------------------------------------
+
+// {car: 2, person: 4} -> "4 people, 2 cars" (largest first).
+function cbbaCountsText(counts) {
+  const entries = Object.entries(counts || {}).filter(([, k]) => k > 0);
+  if (!entries.length) return "nothing detected";
+  const plural = { person: "people", bus: "buses" };
+  return entries
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([name, k]) => `${k} ${k === 1 ? name : plural[name] || name + "s"}`)
+    .join(", ");
+}
+
+function cbbaSumCounts(list) {
+  const out = {};
+  for (const c of list) for (const [k, v] of Object.entries(c || {})) out[k] = (out[k] || 0) + v;
+  return out;
+}
+
+// Bid messages delivered in the last windowS seconds up to t, as
+// unordered drone pairs: [["D1", "D2"], ...]. Frames carry them as
+// (sender, receiver) in frame.talk.
+function cbbaTalkAt(frames, t, windowS = 2) {
+  const seen = new Set();
+  const out = [];
+  for (const f of frames) {
+    if (f.t > t) break;
+    if (f.t <= t - windowS || !f.talk) continue;
+    for (const [a, b] of f.talk) {
+      const pair = [a, b].sort();
+      const key = pair.join("|");
+      if (!seen.has(key)) {
+        seen.add(key);
+        out.push(pair);
+      }
+    }
+  }
+  return out;
+}
+
+// First inspection of each point, in time order: [{point, drone, t}].
+function cbbaInspections(events) {
+  const out = [];
+  const seen = new Set();
+  for (const e of events) {
+    if (e.kind !== "inspect") continue;
+    const m = /inspected (\S+?)(?: \(|\.$)/.exec(e.text);
+    if (m && !seen.has(m[1])) {
+      seen.add(m[1]);
+      out.push({ point: m[1], drone: e.drone, t: e.t });
+    }
+  }
+  return out;
+}
+
+// Leaflet bounds -> the server's MapView, kept inside valid lat/lon.
+function cbbaMapView(south, west, north, east) {
+  const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
+  return { south: clamp(south, -89.9, 89.9), west: clamp(west, -180, 180), north: clamp(north, -89.9, 89.9), east: clamp(east, -180, 180) };
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     cbbaDroneColor, cbbaDistanceM, cbbaAutoFence, cbbaLinks, cbbaBuildScenario, cbbaCheckState,
     cbbaPointStatuses, cbbaClaimOwners, cbbaApplyScenario, cbbaReplaySteps, cbbaEventText,
     cbbaFrameAt, cbbaInspectorsUpTo, cbbaEpochAt, CBBA_STATUS_TEXT,
     cbbaGroupIssues, cbbaAgreementText, cbbaEscape, cbbaShortName, CBBA_COLORS,
+    cbbaCountsText, cbbaSumCounts, cbbaTalkAt, cbbaInspections, cbbaMapView,
   };
 }
 
@@ -325,6 +387,7 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
   const CBBA_BASE = params.get("cbba") || "http://localhost:8020";
   const STORE_KEY = "uas-cbba-mission-v1";
   const layer = L.layerGroup().addTo(map);
+  const camLayer = L.layerGroup().addTo(map); // camera results (redrawn only when they change)
   const $ = (id) => document.getElementById(id);
   const esc = cbbaEscape;
 
@@ -339,6 +402,9 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
   let stepIdx = 0;
   // Live-agent simulation playback
   const sim = { data: null, t: 0, running: false, speed: 10, raf: null, lastTs: null, failures: [] };
+  // Quick survey: is the mission one made by "Go", and what each camera saw
+  // ("point|drone" -> "pending" or the server's CameraResult).
+  const survey = { active: false, camera: {}, shownKey: "" };
 
   function save() {
     try {
@@ -370,6 +436,7 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
   function edited() {
     stopSim();
     sim.data = null;
+    clearCamera();
     last = null;
     steps = [];
     view = "edit";
@@ -492,6 +559,16 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
       for (const [a, b] of simFrame.links) {
         if (!at[a] || !at[b]) continue;
         L.polyline([[at[a].lat, at[a].lon], [at[b].lat, at[b].lon]], { color: "#7c3aed", weight: 1.5, dashArray: "2 5", opacity: 0.8, interactive: false }).addTo(layer);
+      }
+    }
+
+    // Bids being exchanged right now (the drones deciding who does what)
+    if (simFrame) {
+      const at = Object.fromEntries(simFrame.drones.map((d) => [d.id, d]));
+      for (const [a, b] of cbbaTalkAt(sim.data.frames, sim.t)) {
+        if (!at[a] || !at[b]) continue;
+        L.polyline([[at[a].lat, at[a].lon], [at[b].lat, at[b].lon]], { color: "#f97316", weight: 5, opacity: 0.85, ...noBubble })
+          .bindTooltip(`${esc(a)} ⇄ ${esc(b)}: sending each other their bids (who wants which place)`).addTo(layer);
       }
     }
 
@@ -834,6 +911,7 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
     }
     stopSim();
     const t = keepTime ? sim.t : 0;
+    if (!keepTime) clearCamera();
     $("cbba-sim-status").textContent = "The drones are flying the mission (simulation running on the server)…";
     try {
       const resp = await fetch(`${CBBA_BASE}/sim/run`, {
@@ -872,7 +950,11 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
   }
   function simTick(ts) {
     if (!sim.running) return;
-    if (sim.lastTs != null) sim.t += ((ts - sim.lastTs) / 1000) * sim.speed;
+    // Slow down while the drones are talking (planning), so it can be seen.
+    const now = cbbaFrameAt(sim.data.frames, sim.t);
+    const talking = now && now.drones.some((d) => d.status === "planning" || d.status === "holding");
+    const speed = talking ? Math.min(sim.speed, 2) : sim.speed;
+    if (sim.lastTs != null) sim.t += ((ts - sim.lastTs) / 1000) * speed;
     sim.lastTs = ts;
     const end = sim.data.frames[sim.data.frames.length - 1].t;
     if (sim.t >= end) {
@@ -928,8 +1010,11 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
     if (!has) {
       status.textContent = "Set the radio and what goes wrong, then press Run. Each drone runs its own loop: it sends heartbeats, bids, notices silent teammates and re-plans.";
       $("cbba-fly-log").innerHTML = "";
+      renderCamera();
       return;
     }
+    cameraTick();
+    renderCamera();
     const d = sim.data;
     const end = d.frames[d.frames.length - 1].t;
     const frame = cbbaFrameAt(d.frames, sim.t);
@@ -953,22 +1038,27 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
   }
 
   // ---- example & reset --------------------------------------------------------
+  // A whole scenario from the server (example or quick survey) -> editor.
+  function useScenario(sc) {
+    state.drones = sc.drones.map((d) => ({
+      id: d.drone_id, lat: d.start.lat, lon: d.start.lon, battery: Math.round(d.battery_pct), caps: d.capabilities, offline: false, radioBroken: false,
+    }));
+    state.points = sc.points.map((p) => ({
+      id: p.point_id, lat: p.lat, lon: p.lon, sensor: p.required_capability || "", deadline: p.deadline_s || "", hover: p.inspect_duration_s || 0, value: p.value,
+    }));
+    state.fence = sc.geofence.points.map((p) => ({ lat: p.lat, lon: p.lon }));
+    state.radioMode = "all";
+    state.missionId = null;
+    edited();
+  }
+
   async function loadExample() {
     stopSim();
     try {
       const resp = await fetch(`${CBBA_BASE}/cbba/sample`);
       const body = await resp.json();
-      const sc = body.scenario;
-      state.drones = sc.drones.map((d) => ({
-        id: d.drone_id, lat: d.start.lat, lon: d.start.lon, battery: Math.round(d.battery_pct), caps: d.capabilities, offline: false, radioBroken: false,
-      }));
-      state.points = sc.points.map((p) => ({
-        id: p.point_id, lat: p.lat, lon: p.lon, sensor: p.required_capability || "", deadline: p.deadline_s || "", hover: p.inspect_duration_s || 0, value: p.value,
-      }));
-      state.fence = sc.geofence.points.map((p) => ({ lat: p.lat, lon: p.lon }));
-      state.radioMode = "all";
-      state.missionId = null;
-      edited();
+      survey.active = false;
+      useScenario(body.scenario);
       fitAll();
       $("cbba-output").textContent = "Example loaded (3 drones, 11 places near Stanford). Click Run CBBA.";
     } catch (err) {
@@ -989,6 +1079,7 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
         $("cbba-output").textContent = "No running drone is reporting a position right now. " + (body.notes || []).join("; ");
         return;
       }
+      survey.active = false;
       const old = Object.fromEntries(state.drones.map((d) => [d.id, d]));
       state.drones = body.drones.map((d) => ({
         id: d.id, lat: d.lat, lon: d.lon, battery: Math.round(d.battery),
@@ -1006,8 +1097,168 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
   function clearAll() {
     if ((state.drones.length || state.points.length) && !confirm("Remove all drones, places and the fence?")) return;
     state = { drones: [], points: [], fence: null, radioMode: state.radioMode, rangeM: state.rangeM, missionId: null };
+    survey.active = false;
     edited();
     $("cbba-output").textContent = "Cleared. Search for any city above the map, then add drones and places.";
+  }
+
+  // ---- quick survey: one line -> mission -> plan -> flight -> camera -----------------
+  function setSurveyHeader(html) {
+    survey.header = html;
+    survey.shownKey = "";
+    renderCamera();
+  }
+
+  async function goSurvey() {
+    const text = $("cbba-survey-text").value.trim();
+    if (!text) {
+      setSurveyHeader('<p class="cbba-line">Type one line first, e.g. <i>3 drones survey this area</i>.</p>');
+      return;
+    }
+    if (clickMode) setClickMode(clickMode);
+    const b = map.getBounds();
+    setSurveyHeader('<p class="cbba-line">Reading your line…</p>');
+    let body;
+    try {
+      const resp = await fetch(`${CBBA_BASE}/survey/plan`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, view: cbbaMapView(b.getSouth(), b.getWest(), b.getNorth(), b.getEast()), engine: $("cbba-survey-engine").value }),
+      });
+      body = await resp.json();
+      if (!resp.ok) {
+        const why = Array.isArray(body.detail) ? body.detail.map((d) => d.msg).join("; ") : body.detail || resp.status;
+        setSurveyHeader(`<p class="cbba-line">The server could not use that: ${esc(why)}. Move the map a little and try again.</p>`);
+        return;
+      }
+    } catch (err) {
+      setSurveyHeader(`<p class="cbba-line">${esc(serverDown(err)).replace(/\n/g, "<br>")}</p>`);
+      return;
+    }
+    if (body.question) {
+      setSurveyHeader(`<p class="cbba-line">${esc(body.question)}</p>`);
+      return;
+    }
+    survey.active = true;
+    useScenario(body.scenario);
+    const intro =
+      `<div class="cbba-label">Understood by: ${esc(body.provider)}</div>` +
+      `<p class="cbba-line">${body.scenario.drones.length} drones, ${body.scenario.points.length} survey points (S01…) over ` +
+      `${esc(body.area)} in the middle of your map.</p>`;
+    setSurveyHeader(intro + '<p class="cbba-line">The drones are talking to decide who goes where…</p>');
+    await runPlan({ instruction: text });
+    if (!last) {
+      setSurveyHeader(intro + '<p class="cbba-line">Planning did not run - see "2 · Plan with CBBA" below.</p>');
+      return;
+    }
+    if (!last.result.dispatch_allowed) {
+      setSurveyHeader(intro + '<p class="cbba-line"><b>The safety check blocked the plan</b> - the reasons are in "2 · Plan with CBBA" below.</p>');
+      return;
+    }
+    setSurveyHeader(
+      intro +
+      `<p class="cbba-line">✓ ${esc(cbbaAgreementText(last.result))} Safety check passed. Now flying - watch the map: ` +
+      "orange lines = drones sending each other bids, 📷 = what each camera saw. You can still type a change in " +
+      '"Tell the drones" (e.g. <i>D2 is offline</i>) or make a drone fail in "4 · Live agents".</p>'
+    );
+    await runSim(false);
+  }
+
+  function clearCamera() {
+    survey.camera = {};
+    survey.gen = (survey.gen || 0) + 1;
+    survey.shownKey = "";
+    camLayer.clearLayers();
+  }
+
+  // Ask for the camera result of every point inspected so far (once each).
+  function cameraTick() {
+    const pts = Object.fromEntries(state.points.map((p) => [p.id, p]));
+    for (const ins of cbbaInspections(sim.data.events)) {
+      if (ins.t > sim.t) break;
+      const key = `${ins.point}|${ins.drone}`;
+      if (survey.camera[key] || !pts[ins.point]) continue;
+      survey.camera[key] = "pending";
+      fetchCamera(key, ins, pts[ins.point], survey.gen);
+    }
+  }
+
+  async function fetchCamera(key, ins, p, gen) {
+    let r;
+    try {
+      const resp = await fetch(`${CBBA_BASE}/survey/camera`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ drone_id: ins.drone, point_id: ins.point, lat: p.lat, lon: p.lon }),
+      });
+      r = await resp.json();
+      if (!resp.ok) throw new Error(resp.status);
+    } catch (err) {
+      r = { error: String(err) };
+    }
+    if (gen !== survey.gen) return; // a newer flight replaced this one
+    survey.camera[key] = r;
+    renderCamera();
+  }
+
+  function renderCamera() {
+    const inFlight = view === "sim" && sim.data;
+    const shown = inFlight ? cbbaInspections(sim.data.events).filter((i) => i.t <= sim.t) : [];
+    const ready = shown.filter((i) => {
+      const r = survey.camera[`${i.point}|${i.drone}`];
+      return r && r !== "pending";
+    });
+    const end = inFlight ? sim.data.frames[sim.data.frames.length - 1].t : 0;
+    const ended = inFlight && sim.t >= end && !sim.running;
+    const key = `${ready.map((i) => i.point).join(",")}#${ended}#${inFlight ? 1 : 0}`;
+    if (key === survey.shownKey) return;
+    survey.shownKey = key;
+
+    camLayer.clearLayers();
+    const pts = Object.fromEntries(state.points.map((p) => [p.id, p]));
+    const rows = [];
+    ready.forEach((i, idx) => {
+      const r = survey.camera[`${i.point}|${i.drone}`];
+      const p = pts[i.point];
+      if (!p) return;
+      const name = cbbaShortName(i.point);
+      const what = r.error ? "camera unavailable" : cbbaCountsText(r.counts);
+      const total = r.error ? "?" : Object.values(r.counts).reduce((a, b) => a + b, 0);
+      L.marker([p.lat, p.lon], {
+        icon: L.divIcon({ className: "cbba-cam-wrap", html: `<div class="cbba-cam">📷 ${total}</div>`, iconSize: [40, 16], iconAnchor: [-12, 26] }),
+        bubblingMouseEvents: false,
+      })
+        .bindTooltip(`<b>${esc(name)}</b> (${esc(i.drone)}): ${esc(what)}`,
+          { permanent: idx === ready.length - 1 && !ended, direction: "top" })
+        .addTo(camLayer);
+      rows.push(`<li><span class="cbba-dot" style="background:${color(i.drone)}"></span>📷 <b>${esc(name)}</b> (${esc(i.drone)}, t=${i.t} s): ${esc(what)}</li>`);
+    });
+
+    const parts = [survey.header || ""];
+    if (ready.length) {
+      const first = survey.camera[`${ready[0].point}|${ready[0].drone}`];
+      const src = first.source === "perception"
+        ? "Camera: real YOLOv8 detection by the perception service, on its sample photo or your webcam - not a picture of this place."
+        : "Camera: simulated - made-up counts for the demo (start the perception service on port 8010 for real YOLOv8 detection).";
+      if (ended) {
+        const results = ready.map((i) => survey.camera[`${i.point}|${i.drone}`]).filter((r) => !r.error);
+        const totals = cbbaSumCounts(results.map((r) => r.counts));
+        let busiest = null;
+        for (const r of results) {
+          const n = Object.values(r.counts).reduce((a, b) => a + b, 0);
+          if (!busiest || n > busiest.n) busiest = { n, point: r.point_id };
+        }
+        parts.push(
+          `<div class="cbba-summary cbba-line"><b>Survey finished:</b> ${ready.length} of ${state.points.length} place(s) checked. ` +
+          `Seen in total: ${esc(cbbaCountsText(totals))}.` +
+          (busiest && busiest.n ? ` Busiest place: ${esc(cbbaShortName(busiest.point))} (${busiest.n} things).` : "") +
+          "</div>"
+        );
+      }
+      parts.push(`<div class="perception-heading">Camera results (newest first)</div><ul class="cbba-list cbba-cam-list">${rows.reverse().join("")}</ul>`);
+      parts.push(`<p class="cbba-line cbba-muted">${esc(src)}</p>`);
+    }
+    $("cbba-survey-output").innerHTML = parts.join("");
   }
 
   // ---- "tell the drones" (instructions) -----------------------------------------
@@ -1081,6 +1332,8 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
     $("cbba-instruct-output").innerHTML =
       '<p class="cbba-line">Applied. The drones are re-planning…</p><ul class="cbba-list cbba-ok">' + changes.map((c) => `<li>✓ ${esc(c)}</li>`).join("") + "</ul>";
     await runPlan({ source: "instruction", instruction: text, changes });
+    // In a quick survey, fly the changed plan straight away.
+    if (survey.active && last && last.result.dispatch_allowed) await runSim(false);
   }
 
   // ---- CBBA server status (port 8020), checked every 5 s ----------------------------
@@ -1151,6 +1404,13 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
     if (e.target.dataset.i === undefined) return;
     sim.failures.splice(Number(e.target.dataset.i), 1);
     renderFailures();
+  });
+  $("btn-cbba-survey-go").addEventListener("click", goSurvey);
+  $("cbba-survey-text").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      goSurvey();
+    }
   });
   $("btn-cbba-understand").addEventListener("click", understand);
   $("btn-cbba-apply").addEventListener("click", applyProposal);

@@ -129,6 +129,7 @@ class MissionSim:
         self.epochs: list[EpochRecord] = []
         self.planning: dict | None = None  # the epoch being planned (observer's bookkeeping)
         self.false_alarms = 0
+        self.talk: list[tuple[str, str]] = []  # bid messages delivered this tick (for the frame)
         for x in excluded_drones:
             self.log("inject", x.item_id, f"{x.item_id} takes no part: {x.reason}.")
         for x in self.excluded_points:
@@ -384,6 +385,7 @@ class MissionSim:
                         self._join_epoch(d, p["epoch"], p["points"], p["excluded"], p["dispatched"])
                 elif m.message_type == "cbba" and p["epoch"] == d.epoch and d.agent is not None and not d.epoch_dispatched:
                     cbba.append(CbbaMessage(**{k: v for k, v in p.items() if k != "epoch"}))
+                    self.talk.append((m.sender_id, d.id))
             if d.agent is not None and not d.epoch_dispatched:
                 d.agent.consensus(cbba, self.tick)
 
@@ -511,7 +513,9 @@ class MissionSim:
                     for d in self.drones.values()],
             inspected=sorted(self.inspected_by),
             links=graph.links(),
+            talk=self.talk,
         ))
+        self.talk = []
 
     def _finished(self) -> bool:
         if self.planning is not None:

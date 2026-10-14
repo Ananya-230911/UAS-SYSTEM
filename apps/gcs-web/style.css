@@ -838,3 +838,16 @@ main {
 .cbba-server--ok { color: #15803d; }
 .cbba-server--down { color: var(--red); }
 .cbba-server--unknown { color: var(--muted); }
+
+/* Quick survey (one line) */
+.section-survey { border-left: 4px solid #f97316; }
+#cbba-survey-text { width: 100%; box-sizing: border-box; padding: 0.4rem; border: 1px solid var(--border); border-radius: 6px; font: inherit; font-size: 0.85rem; resize: vertical; }
+#cbba-survey-engine { padding: 0.3rem; border: 1px solid var(--border); border-radius: 5px; font-size: 0.78rem; }
+#btn-cbba-survey-go { font-weight: 700; }
+.cbba-legend { font-size: 0.74rem; }
+.cbba-key { display: inline-block; width: 1.4rem; height: 0; vertical-align: middle; margin: 0 0.15rem; }
+.cbba-key--talk { border-top: 4px solid #f97316; }
+.cbba-key--radio { border-top: 2px dashed #7c3aed; }
+.cbba-cam-wrap { background: none; border: none; }
+.cbba-cam { font-size: 0.7rem; font-weight: 700; background: #fff; border: 1px solid #0f172a; border-radius: 9px; padding: 0 0.3rem; white-space: nowrap; box-shadow: 0 1px 2px rgba(0,0,0,.3); }
+.cbba-cam-list li { font-size: 0.78rem; }

@@ -173,6 +173,9 @@ powershell -ExecutionPolicy Bypass -File scripts\run_all.ps1
 ```
 The header badge is only the flight API (port 8000); the Multi-drone
 panel shows its own "CBBA server: connected ✓" line (port 8020).
+Then try **★ Quick survey** at the top of the Multi-drone panel: search
+any place, type *"3 drones survey this area"*, press **Go**
+(docs/adr/0021-one-line-survey.md).
 
 ### Want API authentication (Phase 5)?
 

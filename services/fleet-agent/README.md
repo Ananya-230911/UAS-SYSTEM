@@ -66,6 +66,7 @@ without the flight simulators running. `app/server.py` is read-only:
 | File | What it does |
 | --- | --- |
 | `app/server.py` | Read-only HTTP API on port 8020 for the GCS panel |
+| `app/survey.py` | One line + map view -> survey mission; camera results (display only) |
 | `app/cbba/models.py` | Inspection points, drones (with sensors), comms, config, results |
 | `app/cbba/scoring.py` | Time-discounted score; best place to insert a point into a route |
 | `app/cbba/agent.py` | One drone's CBBA: build bundle, consensus (paper Table I), release lost points; bid warping |
@@ -74,6 +75,22 @@ without the flight simulators running. `app/server.py` is read-only:
 | `app/cbba/sga.py` | Centralised greedy reference answer, used to check CBBA |
 | `app/cbba/safety_gate.py` | Fence, altitude, battery, sensor, deadline, duplicate checks -- reuses `app/safety/validator.py` |
 | `app/cbba/service.py` | `allocate(scenario)` -- the single entry point |
+
+## Quick survey: one line, any place (Phase F)
+
+In the GCS panel, box **★ Quick survey**: search any place on the map,
+type e.g. *"3 drones survey this area"* and press **Go**. The middle of
+your map view (up to 1.2 km a side) is covered with survey points; CBBA
+splits them between the drones (orange lines on the map = drones sending
+each other bids); the safety gate checks the plan; the drones fly it
+(Phase E); each point gets a 📷 camera result and a summary at the end.
+"Tell the drones" and "Make this drone fail now" still work on it.
+The AI (Groq, or the built-in rules) only reads *how many drones* and *what
+altitude* -- positions come from the map, routes from CBBA. Camera: real
+YOLOv8 from `services/perception` if it is running (on its sample photo or
+your webcam -- not a picture of that place), otherwise labelled made-up
+counts. Server: `app/survey.py`, `POST /survey/plan`, `POST /survey/camera`.
+See `docs/adr/0021-one-line-survey.md`.
 
 ## Live agents (Phase E)
 

@@ -1,8 +1,9 @@
 # CBBA Multi-Drone Task Allocation — Revised Plan (for approval)
 
-Status: **APPROVED.** Phases A-E done (ADR-0018, ADR-0019, ADR-0020); most
-of F (map panel, mission editor, replay, live-agent playback) was built
-along the way. Remaining: G (scenario tests), F polish. One deviation found while building
+Status: **APPROVED.** Phases A-F done (ADR-0018, ADR-0019, ADR-0020,
+ADR-0021). F also gained the one-line survey the operator asked for:
+search any place, type "3 drones survey this area", watch them talk, fly
+and report camera results (ADR-0021). Remaining: G (scenario tests). One deviation found while building
 Phase B: bid warping was added to the bundle phase (section 2A, Decide).
 
 Simulation only. These are inspection scenarios: drones visit inspection
@@ -355,7 +356,10 @@ class Transport(Protocol):
   heartbeats, failure injection, read-only live start positions.
 - **F — Dashboard:** gcs-web "CBBA simulation" section; inspection
   points, per-drone bundle routes, winners, convergence rounds, blocked
-  reasons, the "sim" label.
+  reasons, the "sim" label. **Done**, plus the one-line survey
+  (`app/survey.py`, `/survey/plan`, `/survey/camera`; ADR-0021), which
+  also builds a first, display-only version of §2C (camera results from
+  the perception service, or labelled simulated counts; not stored yet).
 - **G — Scenario tests:** end-to-end scripted scenarios (nominal, drone
   loss, comms cut, low battery, fence change), with real run output
   reported.

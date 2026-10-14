@@ -33,3 +33,9 @@ drones decided round by round, and fly the plan in a browser-side
 simulation (with a "make this drone fail" re-plan). It sends nothing to any
 vehicle. Start the server with `scripts/run_cbba.ps1`; the
 page defaults to `http://localhost:8020` (override with `?cbba=...`).
+
+**★ Quick survey** (top of that panel): search any place, type *"3 drones
+survey this area"*, press **Go** -- survey points over the middle of the
+view, CBBA, safety check, flight playback, 📷 camera result per point and a
+summary. Orange lines = drones exchanging bids. See
+`docs/adr/0021-one-line-survey.md`.
