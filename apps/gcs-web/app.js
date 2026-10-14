@@ -440,10 +440,11 @@ python simulation\\sitl\\sim.py --target-host 127.0.0.1 --target-port ${mavlinkP
 $env:GATEWAY_URLS_JSON = '{"${vehicleId}": "http://127.0.0.1:${gatewayPort}"}'`;
 }
 
-function setStatus(state, text) {
+function setStatus(state, text, hint = "") {
   const el = document.getElementById("connection-status");
   el.className = `status status--${state}`;
   el.textContent = text;
+  el.title = hint;
 }
 
 function fmt(value, digits = 1, suffix = "") {
@@ -645,9 +646,15 @@ async function loadHistory() {
 
 function connectFleetWebSocket() {
   const ws = new WebSocket(withApiKey(`${WS_BASE}/ws/fleet`));
-  ws.onopen = () => setStatus("connected", "live");
+  ws.onopen = () => setStatus("connected", "live", `Connected to the flight API at ${API_BASE}`);
   ws.onclose = () => {
-    setStatus("disconnected", "disconnected — retrying…");
+    // This badge is only the flight API (services/api, port 8000) -- the
+    // CBBA panel has its own server and its own status line.
+    setStatus(
+      "disconnected",
+      "flight API offline — retrying…",
+      `No flight API at ${API_BASE}. Start everything with: powershell -ExecutionPolicy Bypass -File scripts\\run_all.ps1`
+    );
     setTimeout(connectFleetWebSocket, 2000);
   };
   ws.onerror = () => ws.close();

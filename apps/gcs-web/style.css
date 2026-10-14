@@ -833,3 +833,8 @@ main {
 .cbba-ev--replan, .cbba-ev--plan { color: #5b21b6; }
 .cbba-ev--blocked { color: var(--red); font-weight: 600; }
 .cbba-summary { background: var(--green-light); color: #14532d; padding: 0.4rem !important; border-radius: 6px; }
+
+.cbba-server { font-size: 0.78rem; font-weight: 600; margin: 0.2rem 0 0.5rem; }
+.cbba-server--ok { color: #15803d; }
+.cbba-server--down { color: var(--red); }
+.cbba-server--unknown { color: var(--muted); }

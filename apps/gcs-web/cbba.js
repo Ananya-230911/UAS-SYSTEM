@@ -1083,6 +1083,21 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
     await runPlan({ source: "instruction", instruction: text, changes });
   }
 
+  // ---- CBBA server status (port 8020), checked every 5 s ----------------------------
+  async function checkCbbaServer() {
+    const el = $("cbba-server-status");
+    let ok = false;
+    try {
+      ok = (await fetch(`${CBBA_BASE}/health`, { cache: "no-store" })).ok;
+    } catch (e) {
+      ok = false;
+    }
+    el.className = `cbba-server cbba-server--${ok ? "ok" : "down"}`;
+    el.textContent = ok
+      ? `CBBA server: connected ✓ (${CBBA_BASE})`
+      : `CBBA server: not running at ${CBBA_BASE}. Start everything with: powershell -ExecutionPolicy Bypass -File scripts\\run_all.ps1`;
+  }
+
   // ---- wiring -------------------------------------------------------------------
   function renderAll() {
     renderSetup();
@@ -1143,6 +1158,8 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) understand();
   });
   refreshAiStatus();
+  checkCbbaServer();
+  setInterval(checkCbbaServer, 5000);
 
   const hadSaved = load();
   renderAll();

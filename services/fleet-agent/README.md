@@ -52,8 +52,8 @@ $env:PYTHONPATH = "."
 
 ```powershell
 # one-time: .venv\Scripts\pip.exe install -r services\fleet-agent\requirements.txt
-powershell -ExecutionPolicy Bypass -File scripts\run_cbba.ps1      # server on :8020
-cd apps\gcs-web; ..\..\.venv\Scripts\python.exe -m http.server 8080  # if the GCS isn't already running
+powershell -ExecutionPolicy Bypass -File scripts\run_all.ps1       # flight stack + CBBA server + page, then checks them
+# or only the CBBA server:  powershell -ExecutionPolicy Bypass -File scripts\run_cbba.ps1
 ```
 Open `http://localhost:8080/` and scroll the right-hand panel to
 **Multi-drone (simulation)**: 1 set up the mission by clicking the map (any

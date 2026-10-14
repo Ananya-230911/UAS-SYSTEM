@@ -164,6 +164,16 @@ Every vehicle in the Fleet list also now shows **STALE** (no telemetry
 for 3s) or **DISCONNECTED** (15s) instead of silently going quiet —
 useful once you're watching more than one or two vehicles at a time.
 
+**Everything at once (flight stack + CBBA multi-drone panel):**
+`scripts/run_all.ps1` runs `run_fleet.ps1` and `run_cbba.ps1`, skips
+whatever is already running, then checks ports 8000 / 8020 / 8080 and
+says exactly which one is missing:
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run_all.ps1
+```
+The header badge is only the flight API (port 8000); the Multi-drone
+panel shows its own "CBBA server: connected ✓" line (port 8020).
+
 ### Want API authentication (Phase 5)?
 
 Off by default — everything above works unchanged with no key. To turn
