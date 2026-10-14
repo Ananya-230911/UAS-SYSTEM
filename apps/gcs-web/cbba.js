@@ -1132,6 +1132,13 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text, view: cbbaMapView(b.getSouth(), b.getWest(), b.getNorth(), b.getEast()), engine: $("cbba-survey-engine").value }),
       });
+      if (resp.status === 404) {
+        setSurveyHeader(
+          '<p class="cbba-line cbba-issues">The CBBA server on port 8020 is an old copy (started before you pulled the new code), so it has no quick survey yet. ' +
+          "Close its window and start it again: <code>powershell -ExecutionPolicy Bypass -File scripts\\run_all.ps1 -Webcam</code></p>"
+        );
+        return;
+      }
       body = await resp.json();
       if (!resp.ok) {
         const why = Array.isArray(body.detail) ? body.detail.map((d) => d.msg).join("; ") : body.detail || resp.status;
