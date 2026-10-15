@@ -247,3 +247,68 @@ def test_survey_endpoint():
     assert body["question"] is None and len(body["scenario"]["drones"]) == 3 and body["area"]
     q = client.post("/survey/plan", json={"text": "attack it", "view": v}).json()
     assert q["scenario"] is None and "outside" in q["question"]
+
+
+# --- a place named in the line (operator: "3 drones survey sector 15 area") ----------
+
+FARIDABAD_VIEW = MapView(south=28.385, west=77.285, north=28.425, east=77.335)   # what was on screen
+SECTOR15 = {"lat": "28.3963", "lon": "77.3237", "display_name": "Sector 15, Faridabad, Haryana, India",
+            "boundingbox": ["28.3915", "28.4011", "77.3180", "77.3294"]}
+
+
+def _nominatim(hits_bounded, hits_anywhere=None):
+    calls = []
+
+    def handler(request):
+        params = dict(request.url.params)
+        calls.append(params)
+        hits = hits_bounded if params["bounded"] == "1" else (hits_anywhere or [])
+        return httpx.Response(200, json=hits)
+
+    return httpx.Client(transport=httpx.MockTransport(handler)), calls
+
+
+def test_named_place_is_looked_up_near_the_map_and_surveyed():
+    http, calls = _nominatim([SECTOR15])
+    plan = plan_survey(SurveyRequest(text="3 drones survey sector 15 area", view=FARIDABAD_VIEW, engine="rules"), http=http)
+    assert calls[0]["q"] == "sector 15" and calls[0]["bounded"] == "1"
+    w, n, e, s = (float(x) for x in calls[0]["viewbox"].split(","))
+    assert s < 28.3963 < n and w < 77.3237 < e                     # searched around the map on screen
+    assert plan.place["name"].startswith("Sector 15, Faridabad") and plan.place["near_map"] is True
+    lats = [p.lat for p in plan.scenario.points]
+    lons = [p.lon for p in plan.scenario.points]
+    assert sum(lats) / len(lats) == pytest.approx(28.3963, abs=1e-4)   # survey centred on Sector 15,
+    assert sum(lons) / len(lons) == pytest.approx(77.3237, abs=1e-4)   # not on the middle of the view
+    assert allocate(plan.scenario).dispatch_allowed
+
+
+def test_place_not_near_the_map_is_searched_anywhere():
+    iit = {"lat": "28.5450", "lon": "77.1926", "display_name": "IIT Delhi, New Delhi", "boundingbox": ["28.54", "28.55", "77.18", "77.20"]}
+    http, calls = _nominatim([], [iit])
+    plan = plan_survey(SurveyRequest(text="3 drones survey IIT Delhi", view=FARIDABAD_VIEW, engine="rules"), http=http)
+    assert [c["bounded"] for c in calls] == ["1", "0"] and plan.place["near_map"] is False
+
+
+def test_unknown_place_asks_instead_of_guessing():
+    http, _ = _nominatim([], [])
+    with pytest.raises(NeedsClarification, match="couldn't find 'Narnia sector 99'"):
+        plan_survey(SurveyRequest(text="survey Narnia sector 99", view=FARIDABAD_VIEW, engine="rules"), http=http)
+
+
+def test_this_area_never_looks_anything_up():
+    http, calls = _nominatim([SECTOR15])
+    plan = plan_survey(SurveyRequest(text="3 drones survey this area", view=FARIDABAD_VIEW, engine="rules"), http=http)
+    assert calls == [] and plan.place is None
+
+
+def test_ai_gives_the_name_only_the_lookup_gives_the_position():
+    class FakeGroq:
+        name = "groq (fake)"
+
+        def parse(self, _):
+            return ParsedGoal(intent="area_search", num_vehicles=2, place_name="sector 15")
+
+    http, calls = _nominatim([SECTOR15])
+    plan = plan_survey(SurveyRequest(text="please send two drones to look at sector 15", view=FARIDABAD_VIEW), provider=FakeGroq(), http=http)
+    assert calls[0]["q"] == "sector 15" and len(plan.scenario.drones) == 2
+    assert "lat" not in ParsedGoal.model_fields and "lon" not in ParsedGoal.model_fields   # the AI cannot give coordinates

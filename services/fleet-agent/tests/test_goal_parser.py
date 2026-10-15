@@ -137,3 +137,17 @@ def test_default_provider_is_claude_with_an_api_key(monkeypatch):
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-not-real")
     assert isinstance(default_provider(), ClaudeGoalParser)
+
+
+@pytest.mark.parametrize("text, place", [
+    ("3 drones survey sector 15 area", "sector 15"),
+    ("check the area around Connaught Place with 4 drones at 40 m", "Connaught Place"),
+    ("3 drones survey IIT Delhi at 40 m", "IIT Delhi"),
+    ("survey this area with 3 drones", None),
+    ("search for people in this area", None),
+    ("monitor the area with 1 drone", None),
+])
+def test_rules_take_the_named_place_as_written(text, place):
+    from app.mission.goal_parser import RuleBasedGoalParser
+
+    assert RuleBasedGoalParser().parse(text).place_name == place

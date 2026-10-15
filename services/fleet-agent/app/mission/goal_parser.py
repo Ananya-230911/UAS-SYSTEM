@@ -65,6 +65,9 @@ class ParsedGoal(BaseModel):
     intent: Literal["area_search", "unclear"]
     num_vehicles: int | None = Field(default=None, ge=1)
     altitude_m: float | None = Field(default=None, gt=0)
+    # The place the operator NAMED, copied as written ("sector 15"). Never
+    # coordinates: the survey looks the name up on OpenStreetMap itself.
+    place_name: str | None = Field(default=None, max_length=120)
     clarifying_question: str | None = None
 
 
@@ -89,6 +92,36 @@ _VEHICLE_COUNT = re.compile(
     re.IGNORECASE,
 )
 _ALTITUDE = re.compile(r"\b(\d+(?:\.\d+)?)\s*(?:m|meters?|metres?)\b", re.IGNORECASE)
+
+# Words around a place name in a survey line ("survey the area around X with
+# 3 drones"): stripped from both ends; what is left is the place.
+_LEAD_WORDS = {
+    "survey", "surveys", "surveying", "search", "searching", "scan", "scanning", "cover", "sweep", "inspect",
+    "inspecting", "patrol", "explore", "map", "mapping", "check", "monitor", "monitoring", "observe", "look",
+    "find", "see", "recon", "reconnaissance", "please", "can", "you", "go", "do", "let", "lets", "us", "me",
+    "the", "a", "an", "around", "near", "nearby", "at", "in", "over", "of", "on", "for", "with", "and", "to",
+    "area", "areas", "region", "zone", "whole", "entire", "all", "drone", "drones", "quickly", "now", "using",
+}
+_TRAIL_WORDS = {
+    "area", "areas", "region", "zone", "please", "now", "with", "and", "at", "in", "of", "on", "the", "using",
+    "drone", "drones", "quickly", "today", "locality", "neighbourhood", "neighborhood", "surroundings",
+}
+_HERE = re.compile(r"\b(this|here|current|visible|screen)\b", re.IGNORECASE)
+
+
+def extract_place_name(text: str) -> str | None:
+    """'3 drones survey sector 15 area' -> 'sector 15'; 'survey this area' -> None."""
+    if _HERE.search(text):
+        return None
+    t = _ALTITUDE.sub(" ", _VEHICLE_COUNT.sub(" ", text))
+    words = re.findall(r"[A-Za-z0-9][A-Za-z0-9'.&-]*", t)
+    while words and words[0].lower().strip(".") in _LEAD_WORDS:
+        words.pop(0)
+    while words and words[-1].lower().strip(".") in _TRAIL_WORDS:
+        words.pop()
+    name = " ".join(words).strip(" .,-")
+    return name[:120] if any(c.isalpha() for c in name) else None
+
 
 UNCLEAR_QUESTION = (
     "I can plan area search, survey or inspection missions. What should the drones do? "
@@ -118,7 +151,8 @@ class RuleBasedGoalParser:
         # validation -- treat that as "not a usable answer", same as a
         # malformed AI response.
         try:
-            return ParsedGoal(intent="area_search", num_vehicles=num_vehicles, altitude_m=altitude_m)
+            return ParsedGoal(intent="area_search", num_vehicles=num_vehicles, altitude_m=altitude_m,
+                              place_name=extract_place_name(text))
         except ValidationError as exc:
             raise MalformedProviderOutput(str(exc)) from exc
 
@@ -134,7 +168,11 @@ the operator.
 
 Fill num_vehicles and altitude_m only if the operator stated them (altitude in \
 metres). If they did not, leave them null -- the planner has its own defaults, \
-and a guessed value is worse than none."""
+and a guessed value is worse than none.
+
+Fill place_name only with the place the operator names, copied as they wrote it \
+(e.g. "sector 15", "IIT Delhi"). Leave it null if they say "this area" or "here" \
+or name no place. Never give coordinates."""
 
 
 class ClaudeGoalParser:

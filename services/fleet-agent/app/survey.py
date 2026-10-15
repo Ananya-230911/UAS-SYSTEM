@@ -77,29 +77,65 @@ class SurveyPlan(BaseModel):
     provider: str
     scenario: Scenario
     area: str  # plain-English description, e.g. "1.2 x 0.8 km"
+    place: dict | None = None  # the named place as OpenStreetMap found it, or None (map view)
 
 
-def survey_box(view: MapView) -> tuple[float, float, float, float]:
-    """(south, west, north, east) of the survey area: centred on the
-    view, each side clamped to [MIN_SIDE_M, MAX_SIDE_M]."""
-    lat0 = (view.south + view.north) / 2
-    lon0 = (view.west + view.east) / 2
-    h_m = min(MAX_SIDE_M, max(MIN_SIDE_M, (view.north - view.south) * M_PER_DEG_LAT))
-    w_m = min(MAX_SIDE_M, max(MIN_SIDE_M, (view.east - view.west) * m_per_deg_lon(lat0)))
+NOMINATIM_URL = os.environ.get("NOMINATIM_URL", "https://nominatim.openstreetmap.org")
+USER_AGENT = "UAS-SYSTEM student project (simulation; survey place lookup)"
+
+
+def find_place(name: str, view: MapView, http: httpx.Client) -> dict | None:
+    """Look a place name up on OpenStreetMap (Nominatim), preferring matches
+    near the map on screen: many cities have a "Sector 15". Deterministic
+    lookup -- the AI only supplied the name as written."""
+    lat0, lon0 = (view.south + view.north) / 2, (view.west + view.east) / 2
+    # Search box: the view, but at least ~30 km across.
+    half_lat = max((view.north - view.south) / 2, 15_000 / M_PER_DEG_LAT)
+    half_lon = max((view.east - view.west) / 2, 15_000 / m_per_deg_lon(lat0))
+    near = f"{lon0 - half_lon},{lat0 + half_lat},{lon0 + half_lon},{lat0 - half_lat}"
+    for bounded in ("1", "0"):  # near the map first, then anywhere
+        resp = http.get(f"{NOMINATIM_URL}/search", params={"q": name, "format": "jsonv2", "limit": 1,
+                                                          "viewbox": near, "bounded": bounded})
+        resp.raise_for_status()
+        hits = resp.json()
+        if hits:
+            h = hits[0]
+            lat, lon = float(h["lat"]), float(h["lon"])
+            bb = [float(x) for x in h.get("boundingbox", [lat, lat, lon, lon])]  # south, north, west, east
+            return {"query": name, "name": h.get("display_name", name), "lat": lat, "lon": lon,
+                    "w_m": (bb[3] - bb[2]) * m_per_deg_lon(lat), "h_m": (bb[1] - bb[0]) * M_PER_DEG_LAT,
+                    "near_map": bounded == "1", "source": "OpenStreetMap Nominatim"}
+    return None
+
+
+def box_at(lat0: float, lon0: float, w_m: float, h_m: float) -> tuple[float, float, float, float]:
+    """(south, west, north, east) of a w_m x h_m area centred on the point,
+    each side clamped to [MIN_SIDE_M, MAX_SIDE_M]."""
+    h_m = min(MAX_SIDE_M, max(MIN_SIDE_M, h_m))
+    w_m = min(MAX_SIDE_M, max(MIN_SIDE_M, w_m))
     dlat = h_m / 2 / M_PER_DEG_LAT
     dlon = w_m / 2 / m_per_deg_lon(lat0)
     return lat0 - dlat, lon0 - dlon, lat0 + dlat, lon0 + dlon
+
+
+def survey_box(view: MapView) -> tuple[float, float, float, float]:
+    """The middle of the map view (used when the line names no place)."""
+    lat0 = (view.south + view.north) / 2
+    lon0 = (view.west + view.east) / 2
+    return box_at(lat0, lon0, (view.east - view.west) * m_per_deg_lon(lat0), (view.north - view.south) * M_PER_DEG_LAT)
 
 
 def _rect(s: float, w: float, n: float, e: float) -> list[GeofencePoint]:
     return [GeofencePoint(lat=s, lon=w), GeofencePoint(lat=s, lon=e), GeofencePoint(lat=n, lon=e), GeofencePoint(lat=n, lon=w)]
 
 
-def build_survey_scenario(view: MapView, num_drones: int = DEFAULT_DRONES, altitude_m: float | None = None) -> Scenario:
-    """Deterministic: same view and numbers -> same scenario."""
+def build_survey_scenario(view: MapView, num_drones: int = DEFAULT_DRONES, altitude_m: float | None = None,
+                          box: tuple[float, float, float, float] | None = None) -> Scenario:
+    """Deterministic: same area and numbers -> same scenario. `box` (south,
+    west, north, east) overrides the map view (a named place)."""
     if not 1 <= num_drones <= MAX_DRONES:
         raise ValueError(f"num_drones must be 1-{MAX_DRONES}")
-    s, w, n, e = survey_box(view)
+    s, w, n, e = box or survey_box(view)
     lat0 = (s + n) / 2
 
     cells = split_into_cells(SearchArea(points=_rect(s, w, n, e)), min(MAX_POINTS, max(MIN_POINTS, POINTS_PER_DRONE * num_drones)))
@@ -128,8 +164,10 @@ def build_survey_scenario(view: MapView, num_drones: int = DEFAULT_DRONES, altit
     return Scenario(drones=drones, points=points, geofence=fence, **extra)
 
 
-def plan_survey(req: SurveyRequest, provider=None) -> SurveyPlan:
-    """One line + map view -> a survey Scenario, or NeedsClarification."""
+def plan_survey(req: SurveyRequest, provider=None, http: httpx.Client | None = None) -> SurveyPlan:
+    """One line + map view -> a survey Scenario, or NeedsClarification.
+    A place named in the line ("survey sector 15") is looked up and
+    surveyed; otherwise the middle of the map view is."""
     if _TARGETING.search(req.text):
         raise NeedsClarification(OUT_OF_SCOPE_ANSWER)
     if provider is None and req.engine == "rules":
@@ -138,11 +176,29 @@ def plan_survey(req: SurveyRequest, provider=None) -> SurveyPlan:
     num = parsed.num_vehicles or DEFAULT_DRONES
     if num > MAX_DRONES:
         raise NeedsClarification(f"This simulation flies at most {MAX_DRONES} drones. Try e.g. '{MAX_DRONES} drones survey this area'.")
-    scenario = build_survey_scenario(req.view, num, parsed.altitude_m)
-    s, w, n, e = survey_box(req.view)
+    place = None
+    box = None
+    if parsed.place_name:
+        client = http or httpx.Client(timeout=httpx.Timeout(20.0, connect=5.0), headers={"User-Agent": USER_AGENT})
+        try:
+            place = find_place(parsed.place_name, req.view, client)
+        except (httpx.HTTPError, ValueError, KeyError, IndexError) as exc:
+            raise NeedsClarification(
+                f"I couldn't look up '{parsed.place_name}' on OpenStreetMap ({type(exc).__name__}). Search for it in the box "
+                "above the map, then say 'survey this area'.") from exc
+        finally:
+            if http is None:
+                client.close()
+        if place is None:
+            raise NeedsClarification(
+                f"I couldn't find '{parsed.place_name}' on OpenStreetMap. Check the spelling, or search for it in the box "
+                "above the map and say 'survey this area'.")
+        box = box_at(place["lat"], place["lon"], place["w_m"], place["h_m"])
+    scenario = build_survey_scenario(req.view, num, parsed.altitude_m, box=box)
+    s, w, n, e = box or survey_box(req.view)
     lat0 = (s + n) / 2
     size = f"{(e - w) * m_per_deg_lon(lat0) / 1000:.1f} x {(n - s) * M_PER_DEG_LAT / 1000:.1f} km"
-    return SurveyPlan(provider=provider_name, scenario=scenario, area=size)
+    return SurveyPlan(provider=provider_name, scenario=scenario, area=size, place=place)
 
 
 # --- camera ------------------------------------------------------------------------

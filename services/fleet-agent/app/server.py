@@ -187,8 +187,9 @@ def survey_plan(req: SurveyRequest) -> dict:
     try:
         plan = plan_survey(req)
     except NeedsClarification as exc:
-        return {"question": exc.question, "provider": None, "scenario": None, "area": None}
-    return {"question": None, "provider": plan.provider, "scenario": plan.scenario.model_dump(mode="json"), "area": plan.area}
+        return {"question": exc.question, "provider": None, "scenario": None, "area": None, "place": None}
+    return {"question": None, "provider": plan.provider, "scenario": plan.scenario.model_dump(mode="json"), "area": plan.area,
+            "place": plan.place}
 
 
 @app.post("/survey/camera", response_model=CameraResult)

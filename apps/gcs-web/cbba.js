@@ -1234,7 +1234,10 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
     const intro =
       `<div class="cbba-label">Understood by: ${esc(body.provider)}</div>` +
       `<p class="cbba-line">${body.scenario.drones.length} drones, ${body.scenario.points.length} survey points (S01…) over ` +
-      `${esc(body.area)} in the middle of your map.</p>`;
+      `${esc(body.area)} ${body.place ? `around <b>${esc(body.place.name)}</b> (found on OpenStreetMap for "${esc(body.place.query)}")` : "in the middle of your map"}.</p>` +
+      (body.place && !body.place.near_map
+        ? '<p class="cbba-line cbba-issues">That place is not near the map you were looking at. If it is the wrong one, search it above the map and say "survey this area".</p>'
+        : "");
     setSurveyHeader(intro + '<p class="cbba-line">The drones are talking to decide who goes where…</p>');
     await runPlan({ instruction: text });
     if (!last) {
