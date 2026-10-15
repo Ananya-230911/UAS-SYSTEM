@@ -38,11 +38,14 @@ def landcover_sentinel2(scl: np.ndarray, red, nir) -> dict:
     out = {name: round(v / total * 100, 1) for name, v in shares.items() if v}
     if other:
         out["other / unclassified"] = round(other / total * 100, 1)
+    res = {"method": "ESA Sentinel-2 Scene Classification (SCL) + NDVI from the red and near-infrared bands",
+           "percent": dict(sorted(out.items(), key=lambda kv: -kv[1]))}
+    if red is None or nir is None:
+        res["method"] = "ESA Sentinel-2 Scene Classification (SCL); NDVI not available"
+        return res
     clear = ~np.isin(scl, [0, 1, 3, 8, 9, 10])
     ndvi = (np.ma.filled(nir, np.nan) - np.ma.filled(red, np.nan)) / (np.ma.filled(nir, np.nan) + np.ma.filled(red, np.nan) + 1e-6)
     vals = ndvi[clear & np.isfinite(ndvi)]
-    res = {"method": "ESA Sentinel-2 Scene Classification (SCL) + NDVI from the red and near-infrared bands",
-           "percent": dict(sorted(out.items(), key=lambda kv: -kv[1]))}
     if vals.size:
         res["ndvi_mean"] = round(float(vals.mean()), 2)
         res["vegetation_density_percent"] = {

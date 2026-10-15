@@ -112,7 +112,8 @@ def inspect_location(lat: float, lon: float, radius_m: float = 100.0, http: http
         "counts": counts,
         "landcover": landcover,
         "osm": mapped,
-        "limitations": analysis.limitations(img.gsd_m, img.capture_date, img.provider.split(",")[0], ran),
+        "limitations": analysis.limitations(img.gsd_m, img.capture_date, img.provider.split(",")[0], ran)
+        + ([img.extra["bands_note"]] if img.extra.get("bands_note") else []),
         "attempts": attempts,
         "image_jpeg_b64": _jpeg_b64(analysis.annotate(img.rgb, detections, img.gsd_m, label)),
     }

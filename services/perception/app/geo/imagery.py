@@ -53,14 +53,43 @@ def _ca_bundle() -> dict:
         return {}
 
 
+def _proxy() -> dict:
+    """Python (httpx) finds the system/college proxy by itself; GDAL's own
+    HTTP client does not -- hand it the same one."""
+    import urllib.request
+
+    p = urllib.request.getproxies().get("https") or urllib.request.getproxies().get("http")
+    return {"GDAL_HTTP_PROXY": p} if p else {}
+
+
 GDAL_ENV = {
     **_ca_bundle(),
+    **_proxy(),
     "GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR",
     "CPL_VSIL_CURL_ALLOWED_EXTENSIONS": ".tif,.tiff,.TIF,.TIFF",
-    "GDAL_HTTP_TIMEOUT": "30",
-    "GDAL_HTTP_MAX_RETRY": "2",
+    # Slow or flaky connections: wait longer and retry before giving up.
+    "GDAL_HTTP_TIMEOUT": "90",
+    "GDAL_HTTP_CONNECTTIMEOUT": "20",
+    "GDAL_HTTP_MAX_RETRY": "4",
+    "GDAL_HTTP_RETRY_DELAY": "2",
+    "GDAL_HTTP_MERGE_CONSECUTIVE_RANGES": "YES",
+    # Keep downloaded blocks: a survey's places share the same scene blocks.
+    "VSI_CACHE": "TRUE",
+    "VSI_CACHE_SIZE": "100000000",
+    "CPL_VSIL_CURL_CACHE_SIZE": "300000000",
     "GDAL_HTTP_USERAGENT": USER_AGENT,
 }
+
+
+def describe_error(exc: BaseException) -> str:
+    """The error and the causes rasterio hides behind "See previous
+    exception" -- that hidden part is usually the useful one."""
+    parts, seen, cur = [], set(), exc
+    while cur is not None and id(cur) not in seen and len(parts) < 4:
+        seen.add(id(cur))
+        parts.append(f"{type(cur).__name__}: {cur}")
+        cur = cur.__cause__ or cur.__context__
+    return " <- ".join(parts)
 
 
 class ImageryUnavailable(Exception):
@@ -116,7 +145,7 @@ def read_window(href: str, lat: float, lon: float, radius_m: float, bands=None, 
     import rasterio
     from rasterio.enums import Resampling
     from rasterio.warp import transform, transform_bounds
-    from rasterio.windows import from_bounds
+    from rasterio.windows import Window, from_bounds
 
     with rasterio.Env(**GDAL_ENV), rasterio.open(href) as ds:
         west, south, east, north = box_around(lat, lon, radius_m)
@@ -133,9 +162,19 @@ def read_window(href: str, lat: float, lon: float, radius_m: float, bands=None, 
             out_size = (max(1, round(window.height * scale)), max(1, round(window.width * scale)))
         scale = out_size[1] / window.width
         indexes = bands or list(range(1, min(ds.count, 3) + 1))
-        data = ds.read(indexes, window=window, out_shape=(len(indexes), *out_size), boundless=True, masked=True,
-                       resampling=getattr(Resampling, resampling))
         h, w = out_size
+        # Read only the part of the window that lies on the raster (no
+        # "boundless" read: that builds a VRT around the remote file, which
+        # is slow and fragile over HTTP), then pad the rest as "no data".
+        inner = window.intersection(Window(0, 0, ds.width, ds.height))
+        r0 = max(0, min(h - 1, round((inner.row_off - window.row_off) * scale)))
+        c0 = max(0, min(w - 1, round((inner.col_off - window.col_off) * scale)))
+        ih = max(1, min(h - r0, round(inner.height * scale)))
+        iw = max(1, min(w - c0, round(inner.width * scale)))
+        part = ds.read(indexes, window=inner, out_shape=(len(indexes), ih, iw), masked=True,
+                       resampling=getattr(Resampling, resampling))
+        data = np.ma.masked_all((len(indexes), h, w), dtype=part.dtype)
+        data[:, r0:r0 + ih, c0:c0 + iw] = part
         if np.ma.getmaskarray(data)[:, h // 2, w // 2].all():
             raise ValueError("the image has no data at the point")
         return data, native, scale
@@ -174,7 +213,7 @@ def openaerialmap(lat: float, lon: float, radius_m: float, http: httpx.Client) -
         try:
             data, native, scale = read_window(href, lat, lon, radius_m)
         except (ValueError, OSError) as exc:  # rasterio errors are OSError subclasses
-            tried.append(f"{rec.get('title') or href}: {exc}")
+            tried.append(f"{rec.get('title') or href}: {describe_error(exc)}")
             continue
         west, south, east, north = box_around(lat, lon, radius_m)
         date = (rec.get("acquisition_start") or rec.get("acquisition_end") or "")[:10] or None
@@ -215,6 +254,7 @@ def sentinel2(lat: float, lon: float, radius_m: float, http: httpx.Client, max_s
     if not features:
         raise ValueError("no Sentinel-2 scene with under 40% cloud covers this point")
     best = None
+    last_error = "no scene had all of the visual, scl, red and nir files"
     for f in features[:max_scenes]:
         a = f.get("assets", {})
         # s3:// links are "requester pays" (need AWS credentials): skip those scenes.
@@ -224,7 +264,8 @@ def sentinel2(lat: float, lon: float, radius_m: float, http: httpx.Client, max_s
             visual, native, scale = read_window(a["visual"]["href"], lat, lon, radius_m, resampling="nearest")
             size = visual.shape[1:]
             scl = np.ma.filled(read_window(a["scl"]["href"], lat, lon, radius_m, out_size=size, resampling="nearest")[0][0], 0)
-        except (ValueError, OSError):
+        except (ValueError, OSError) as exc:
+            last_error = describe_error(exc)
             continue
         cloud = float(np.isin(scl, list(SCL_CLOUD)).mean() * 100)
         cand = (cloud, f, a, visual, native, scale, scl)
@@ -233,11 +274,17 @@ def sentinel2(lat: float, lon: float, radius_m: float, http: httpx.Client, max_s
         if cloud <= 20:
             break
     if best is None:
-        raise ValueError("Sentinel-2 scenes found, but none had readable public image files")
+        raise ValueError(f"Sentinel-2 scenes found, but their image files could not be read: {last_error}")
     cloud, f, a, visual, native, scale, scl = best
     size = visual.shape[1:]
-    red = _reflectance(read_window(a["red"]["href"], lat, lon, radius_m, out_size=size, resampling="nearest")[0][0], a["red"])
-    nir = _reflectance(read_window(a["nir"]["href"], lat, lon, radius_m, out_size=size, resampling="nearest")[0][0], a["nir"])
+    # Red + near-infrared only add NDVI; if they can't be read, keep the image.
+    try:
+        red = _reflectance(read_window(a["red"]["href"], lat, lon, radius_m, out_size=size, resampling="nearest")[0][0], a["red"])
+        nir = _reflectance(read_window(a["nir"]["href"], lat, lon, radius_m, out_size=size, resampling="nearest")[0][0], a["nir"])
+        bands_note = None
+    except (ValueError, OSError) as exc:
+        red = nir = None
+        bands_note = f"NDVI not computed: the red/near-infrared bands could not be read ({describe_error(exc)})"
     west, south, east, north = box_around(lat, lon, radius_m)
     when = str(f.get("properties", {}).get("datetime", ""))[:10] or None
     return GeoImage(
@@ -247,7 +294,7 @@ def sentinel2(lat: float, lon: float, radius_m: float, http: httpx.Client, max_s
         license="Copernicus Sentinel data: free, full and open (Copernicus data policy)",
         attribution=f"Contains modified Copernicus Sentinel data {when[:4] if when else ''}".strip(),
         source_url=a["visual"]["href"], scene_id=f.get("id"), cloud_pct=round(cloud, 1),
-        extra={"scl": scl, "red": red, "nir": nir},
+        extra={"scl": scl, "red": red, "nir": nir, "bands_note": bands_note},
     )
 
 
@@ -262,7 +309,7 @@ def retrieve(lat: float, lon: float, radius_m: float, http: httpx.Client | None 
                 attempts.append({"source": name, "result": "used"})
                 return img, attempts
             except (ValueError, OSError, httpx.HTTPError, KeyError, TypeError) as exc:
-                attempts.append({"source": name, "result": f"{type(exc).__name__}: {exc}"})
+                attempts.append({"source": name, "result": describe_error(exc)})
     finally:
         if http is None:
             client.close()

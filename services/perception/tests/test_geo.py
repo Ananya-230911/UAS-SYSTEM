@@ -254,3 +254,36 @@ def test_real_obb_model_runs_on_an_image():
     assert isinstance(dets, list)
     assert all(d["model"].startswith("YOLOv8n-OBB") and len(d["polygon"]) == 4 for d in dets)
     assert detection._get_obb_model().names[10] == "small vehicle"
+
+
+def test_point_near_the_scene_edge_is_padded_not_shifted(tmp_path):
+    """Window half outside the raster: the outside part is 'no data', the
+    point stays the centre pixel (nothing is shifted to fill the gap)."""
+    lat, lon = SRM
+    f = _geotiff(tmp_path / "edge.tif", "EPSG:32644", 10.0, lat, lon, size=600)
+    # A point 2.9 km east of SRM: 10 px from the raster's east edge.
+    lon2 = lon + 2900 / (111_320 * math.cos(math.radians(lat)))
+    data, native, scale = read_window(f, lat, lon2, radius_m=150, resampling="nearest")
+    h, w = data.shape[1:]
+    mask = np.ma.getmaskarray(data)[0]
+    assert not mask[h // 2, w // 2] and mask[:, -1].all() and not mask[:, 0].any()
+
+
+def test_describe_error_keeps_the_hidden_cause():
+    try:
+        try:
+            raise OSError("HTTP response code: 0 - Operation timed out after 30000 milliseconds")
+        except OSError as inner:
+            raise imagery.ImageryUnavailable("Read failed. See previous exception for details.", []) from inner
+    except Exception as exc:
+        text = imagery.describe_error(exc)
+    assert "Read failed" in text and "Operation timed out after 30000 milliseconds" in text
+
+
+def test_ndvi_bands_failing_keeps_the_image(tmp_path):
+    feat = _s2_files(tmp_path)
+    feat["assets"]["red"]["href"] = str(tmp_path / "missing_red.tif")
+    img = imagery.sentinel2(*SRM, 100, _client({("POST", "/search"): lambda r: httpx.Response(200, json={"features": [feat]})}))
+    assert _center(img.rgb) == MARK and img.extra["red"] is None and "NDVI not computed" in img.extra["bands_note"]
+    lc = analysis.landcover_sentinel2(img.extra["scl"], None, None)
+    assert lc["percent"] == {"vegetation": 100.0} and "NDVI not available" in lc["method"]

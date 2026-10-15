@@ -1435,7 +1435,7 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
       const off = r.source === "unavailable";
       const geo = r.source === "geo";
       const ran = geo && r.report && r.report.models_run && r.report.models_run.length;
-      const what = off ? (r.note || "no picture") : geo && !ran
+      const what = off ? (cameraMode() === "geo" ? "no real image (reason below)" : "camera not connected") : geo && !ran
         ? `retrieved image (${(r.report.imagery || {}).gsd_m} m/px, no object detection)` : cbbaCountsText(r.counts);
       const total = off ? "✕" : geo && !ran ? "" : Object.values(r.counts).reduce((a, b) => a + b, 0);
       const icon = geo ? "🛰" : "📷";
