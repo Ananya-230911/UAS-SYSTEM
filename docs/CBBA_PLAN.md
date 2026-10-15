@@ -3,7 +3,7 @@
 Status: **APPROVED.** Phases A-F done (ADR-0018, ADR-0019, ADR-0020,
 ADR-0021). F also gained the one-line survey the operator asked for:
 search any place, type "3 drones survey this area", watch them talk, fly
-and report camera results (ADR-0021); each place's image is now real geographic imagery (ADR-0022). Remaining: G (scenario tests). One deviation found while building
+and report camera results (ADR-0021); each place's image is now real geographic imagery (ADR-0022). Phase G done (ADR-0023, docs/PHASE_G_RESULTS.md): 11 scripted scenarios, all passing; it found and fixed a re-planning bug. One deviation found while building
 Phase B: bid warping was added to the bundle phase (section 2A, Decide).
 
 Simulation only. These are inspection scenarios: drones visit inspection
@@ -363,7 +363,8 @@ class Transport(Protocol):
   the place + YOLOv8, or "camera not connected"; not stored yet).
 - **G — Scenario tests:** end-to-end scripted scenarios (nominal, drone
   loss, comms cut, low battery, fence change), with real run output
-  reported.
+  reported. **Done** (`app/scenarios.py`, `tests/scenarios/`, ADR-0023,
+  report `docs/PHASE_G_RESULTS.md`).
 
 After each phase: run all suites, report the real numbers, then stop for
 approval.

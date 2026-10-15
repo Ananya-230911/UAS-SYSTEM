@@ -184,9 +184,14 @@ class MissionSim:
             return
         if d.leaving:
             return
-        todo = [self.points[p] for p in points if p not in d.known_inspected]
+        # Every member bids over the SAME list (the epoch's): CBBA can only
+        # agree when all agents share one task list. A drone that already
+        # knows some are done keeps them in the list; they are dropped from
+        # the routes at dispatch (Phase G found re-plans that never agreed
+        # because each drone had filtered the list by its own knowledge).
+        todo = [self.points[p] for p in points]
         d.lost_link = False
-        if not todo:
+        if not todo or all(p in d.known_inspected for p in points):
             # Nothing left that this drone knows of: it takes no part.
             self._head_home(d, "nothing left to inspect")
             return
@@ -256,7 +261,9 @@ class MissionSim:
             return
         # Members may disagree about what is already done (lost heartbeats):
         # plan over every place any member still considers open.
-        open_ids = sorted({pid for d in members for pid in d.agent.points})
+        # ...and nothing any member knows is already done is flown again.
+        done = set().union(*(d.known_inspected for d in members))
+        open_ids = sorted({pid for d in members for pid in d.agent.points} - done)
         points = [self.points[p] for p in open_ids]
         if not points:
             for d in members:
@@ -273,7 +280,8 @@ class MissionSim:
             base_altitude_m=self.sc.base_altitude_m,
         )
         drones, excl_d, pts, excl_p = split_inputs(scenario)
-        paths = {d.id: (list(d.agent.path), list(d.agent.bundle)) for d in members if d.id in {x.drone_id for x in drones}}
+        paths = {d.id: ([p for p in d.agent.path if p not in done], [p for p in d.agent.bundle if p not in done])
+                 for d in members if d.id in {x.drone_id for x in drones}}
         result = build_result(
             scenario, drones, excl_d, pts, excl_p, self.altitudes, paths,
             method="CBBA", label=SIM_LIVE_LABEL, converged=converged, agreement=agree,
