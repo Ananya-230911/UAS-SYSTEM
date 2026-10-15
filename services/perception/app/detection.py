@@ -69,3 +69,45 @@ def detect_objects_with_image(
                 }
             )
     return detections, image
+
+
+# --- Aerial / satellite images (docs/adr/0022-geographic-imagery.md) ---------------
+# The COCO model above was trained on photos taken from the ground; from
+# straight above, cars and people look nothing like its training data.
+# Ultralytics' YOLOv8-OBB model was trained on DOTA, a dataset of aerial
+# and satellite images, so it is the right YOLOv8 for looking down. Its 15
+# classes: plane, ship, storage tank, baseball diamond, tennis court,
+# basketball court, ground track field, harbor, bridge, large vehicle,
+# small vehicle, helicopter, roundabout, soccer ball field, swimming pool.
+OBB_MODEL_PATH = Path(__file__).parent.parent / ".models" / "yolov8n-obb.pt"
+AERIAL_CONFIDENCE_THRESHOLD = 0.25
+
+_obb_model = None
+
+
+def _get_obb_model():
+    global _obb_model
+    if _obb_model is None:
+        from ultralytics import YOLO
+
+        OBB_MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _obb_model = YOLO(str(OBB_MODEL_PATH))  # weights auto-download on first use (~6 MB)
+    return _obb_model
+
+
+def detect_aerial(bgr, use_coco: bool = False, confidence_threshold: float = AERIAL_CONFIDENCE_THRESHOLD) -> list[dict]:
+    """Run YOLOv8-OBB (aerial) -- and, for very sharp drone-level images,
+    also the COCO model -- on exactly this BGR array. Returns detections
+    with the model name, class, confidence and box corners in pixels."""
+    out = []
+    r = _get_obb_model()(bgr, verbose=False, conf=confidence_threshold, imgsz=1024)[0]
+    if r.obb is not None:
+        for poly, conf, cls in zip(r.obb.xyxyxyxy.tolist(), r.obb.conf.tolist(), r.obb.cls.tolist()):
+            out.append({"model": "YOLOv8n-OBB (DOTA aerial)", "class_name": r.names[int(cls)],
+                        "confidence": round(float(conf), 3), "polygon": [[round(x, 1), round(y, 1)] for x, y in poly]})
+    if use_coco:
+        r = _get_model()(bgr, verbose=False, conf=DEFAULT_CONFIDENCE_THRESHOLD)[0]
+        for (x1, y1, x2, y2), conf, cls in zip(r.boxes.xyxy.tolist(), r.boxes.conf.tolist(), r.boxes.cls.tolist()):
+            out.append({"model": "YOLOv8n (COCO)", "class_name": r.names[int(cls)], "confidence": round(float(conf), 3),
+                        "polygon": [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]})
+    return out

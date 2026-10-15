@@ -39,3 +39,11 @@ survey this area"*, press **Go** -- survey points over the middle of the
 view, CBBA, safety check, flight playback, 📷 camera result per point and a
 summary. Orange lines = drones exchanging bids. See
 `docs/adr/0021-one-line-survey.md`.
+
+**📍 Inspect a real location** (`geoinspect.js`): pick a point on the map
+-> a real image of it (OpenAerialMap, else Sentinel-2) from
+`services/perception` `GET /geo/inspect`, with source, capture date,
+resolution, detections, land cover, OpenStreetMap data and limits; the
+image is laid over the map at its exact bounds. The quick survey uses
+the same for each place by default. See
+`docs/adr/0022-geographic-imagery.md`.

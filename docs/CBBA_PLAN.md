@@ -3,7 +3,7 @@
 Status: **APPROVED.** Phases A-F done (ADR-0018, ADR-0019, ADR-0020,
 ADR-0021). F also gained the one-line survey the operator asked for:
 search any place, type "3 drones survey this area", watch them talk, fly
-and report camera results (ADR-0021). Remaining: G (scenario tests). One deviation found while building
+and report camera results (ADR-0021); each place's image is now real geographic imagery (ADR-0022). Remaining: G (scenario tests). One deviation found while building
 Phase B: bid warping was added to the bundle phase (section 2A, Decide).
 
 Simulation only. These are inspection scenarios: drones visit inspection

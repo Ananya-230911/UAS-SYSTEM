@@ -150,6 +150,19 @@ def plan_survey(req: SurveyRequest, provider=None) -> SurveyPlan:
 class CameraRequest(BaseModel):
     drone_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$")
     point_id: str = Field(min_length=1, max_length=64)
+    # "geo" (default): a REAL image of the point retrieved from an openly
+    # licensed imagery source (perception GET /geo/inspect, ADR-0022).
+    # "webcam": the old demo -- this computer's webcam, not the place.
+    mode: Literal["geo", "webcam"] = "geo"
+    lat: float | None = Field(default=None, ge=-90, le=90)
+    lon: float | None = Field(default=None, ge=-180, le=180)
+    radius_m: float = Field(default=100.0, ge=20, le=1000)
+
+    @model_validator(mode="after")
+    def _geo_needs_position(self) -> CameraRequest:
+        if self.mode == "geo" and (self.lat is None or self.lon is None):
+            raise ValueError("mode 'geo' needs lat and lon")
+        return self
 
 
 class CameraResult(BaseModel):
@@ -158,10 +171,12 @@ class CameraResult(BaseModel):
     # "webcam": a live picture from the webcam, taken now. "sample photo":
     # the perception service runs without the webcam. "unavailable": no
     # camera answered -- counts is empty, nothing is guessed.
-    source: Literal["webcam", "sample photo", "unavailable"]
+    # "geo": retrieved geographic imagery of the point (never live footage).
+    source: Literal["geo", "webcam", "sample photo", "unavailable"]
     counts: dict[str, int]
     image: str | None = None  # data:image/jpeg;base64,... with the boxes drawn
     note: str
+    report: dict | None = None  # geo: the full perception /geo/inspect report (source, date, land cover, OSM, limits)
 
 
 START_CAMERA = r"powershell -ExecutionPolicy Bypass -File scripts\run_perception.ps1 -Webcam"
@@ -171,6 +186,8 @@ def camera_look(req: CameraRequest, http: httpx.Client | None = None, base_url: 
     """Ask the perception service for a picture taken now + YOLOv8 on it.
     GET only. Never invents a result."""
     base_url = base_url or PERCEPTION_URL
+    if req.mode == "geo":
+        return _geo_look(req, http, base_url)
     client = http or httpx.Client(timeout=httpx.Timeout(30.0, connect=2.0))
     try:
         resp = client.get(f"{base_url}/vehicles/{req.drone_id}/perception", params={"image": "true"})
@@ -206,6 +223,45 @@ def camera_look(req: CameraRequest, http: httpx.Client | None = None, base_url: 
             point_id=req.point_id, drone_id=req.drone_id, source="unavailable", counts={},
             note=f"Camera not connected ({base_url}: {type(exc).__name__}). Start it with: {START_CAMERA}",
         )
+    finally:
+        if http is None:
+            client.close()
+
+
+START_VISION = r"powershell -ExecutionPolicy Bypass -File scripts\run_perception.ps1"
+
+
+def _geo_look(req: CameraRequest, http: httpx.Client | None, base_url: str) -> CameraResult:
+    """Real image of the point (OpenAerialMap, else Sentinel-2) + analysis,
+    from the perception service. GET only. A missing image is reported as
+    such -- never replaced."""
+    client = http or httpx.Client(timeout=httpx.Timeout(90.0, connect=2.0))
+    try:
+        resp = client.get(f"{base_url}/geo/inspect", params={"lat": req.lat, "lon": req.lon, "radius_m": req.radius_m})
+        if resp.status_code == 404:
+            detail = resp.json().get("detail", {})
+            tried = "; ".join(f"{a.get('source')}: {a.get('result')}" for a in detail.get("attempts", []))
+            return CameraResult(point_id=req.point_id, drone_id=req.drone_id, source="unavailable", counts={},
+                                note=f"No real image is available for this place ({tried}). Nothing was substituted.")
+        resp.raise_for_status()
+        rep = resp.json()
+        b64 = rep.get("image_jpeg_b64")
+        im = rep.get("imagery", {})
+        note = (f"Retrieved image from {str(im.get('provider', '')).split(',')[0]}"
+                f"{', captured ' + im['capture_date'] if im.get('capture_date') else ''}, {im.get('gsd_m')} m per pixel - "
+                "not live footage from the simulated drone.")
+        return CameraResult(point_id=req.point_id, drone_id=req.drone_id, source="geo", counts=rep.get("counts", {}),
+                            image=f"data:image/jpeg;base64,{b64}" if b64 else None, note=note, report=rep)
+    except httpx.HTTPStatusError as exc:
+        try:
+            why = exc.response.json().get("detail", "")
+        except ValueError:
+            why = exc.response.text[:200]
+        return CameraResult(point_id=req.point_id, drone_id=req.drone_id, source="unavailable", counts={},
+                            note=f"The vision service answered with error {exc.response.status_code}: {why or 'no details'}.")
+    except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+        return CameraResult(point_id=req.point_id, drone_id=req.drone_id, source="unavailable", counts={},
+                            note=f"Vision service not reachable ({base_url}: {type(exc).__name__}). Start it with: {START_VISION}")
     finally:
         if http is None:
             client.close()

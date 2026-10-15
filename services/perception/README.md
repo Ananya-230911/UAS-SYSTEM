@@ -24,6 +24,18 @@ other phase of this project works fully without this service running.
   that ran. **Never issues a command** — it's advisory only, the same
   principle `services/api/app/risk_monitor.py` already established.
 
+- `GET /geo/inspect?lat=&lon=&radius_m=100` — a REAL image of that
+  location from an openly licensed source (OpenAerialMap aerial imagery
+  where it exists, else Copernicus Sentinel-2 at 10 m), analysed: the
+  aerial YOLOv8n-OBB model where the resolution allows, land cover, and
+  OpenStreetMap features (labelled as map data). Records provider,
+  capture date, resolution, licence, attribution and the SHA-256 of the
+  exact pixels analysed. 404 (with what each source said) if no image —
+  nothing is substituted. Retrieved imagery, never presented as live
+  drone footage. See `docs/adr/0022-geographic-imagery.md`. Optional
+  overrides: `OAM_API_URL`, `STAC_API_URL`, `OVERPASS_URL`,
+  `NOMINATIM_URL`. Needs internet access to those services.
+
 ## Run locally
 
 One-time setup — installs into the same shared venv every other

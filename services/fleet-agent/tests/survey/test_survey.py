@@ -151,7 +151,7 @@ def test_instructions_work_on_a_survey_mission():
 # No made-up results anywhere: either a real picture + YOLOv8, or "unavailable".
 
 def _req(**kw):
-    return CameraRequest(**{"drone_id": "D1", "point_id": "S01", **kw})
+    return CameraRequest(**{"drone_id": "D1", "point_id": "S01", "mode": "webcam", **kw})
 
 
 def _perception(camera="webcam", detections=("person", "person", "cup")):
@@ -201,9 +201,43 @@ def test_camera_endpoint_without_a_camera_service(monkeypatch):
     import app.survey as survey_mod
 
     monkeypatch.setattr(survey_mod, "PERCEPTION_URL", "http://127.0.0.1:9")   # nothing listens there
-    body = client.post("/survey/camera", json={"drone_id": "D1", "point_id": "S01"}).json()
+    body = client.post("/survey/camera", json={"drone_id": "D1", "point_id": "S01", "mode": "webcam"}).json()
     assert body["source"] == "unavailable" and body["counts"] == {}
-    assert client.post("/survey/camera", json={"drone_id": "../x", "point_id": "S01"}).status_code == 422
+    assert client.post("/survey/camera", json={"drone_id": "../x", "point_id": "S01", "mode": "webcam"}).status_code == 422
+    # geo is the default and needs the point's position
+    assert client.post("/survey/camera", json={"drone_id": "D1", "point_id": "S01"}).status_code == 422
+    geo = client.post("/survey/camera", json={"drone_id": "D1", "point_id": "S01", "lat": 12.8231, "lon": 80.0442}).json()
+    assert geo["source"] == "unavailable" and geo["counts"] == {} and "Vision service not reachable" in geo["note"]
+
+
+# --- real geographic imagery (ADR-0022) ---------------------------------------------
+
+def _geo_req():
+    return CameraRequest(drone_id="D2", point_id="S04", lat=12.8231, lon=80.0442)
+
+
+def test_geo_mode_asks_for_the_points_real_image():
+    seen = []
+    report = {"imagery": {"provider": "Copernicus Sentinel-2 L2A (ESA), via Element 84 Earth Search", "capture_date": "2026-09-30",
+                          "gsd_m": 10.0}, "counts": {}, "image_jpeg_b64": "SU1H", "models_run": []}
+
+    def handler(request):
+        seen.append((request.method, request.url.path, dict(request.url.params)))
+        return httpx.Response(200, json=report)
+
+    r = camera_look(_geo_req(), http=httpx.Client(transport=httpx.MockTransport(handler)))
+    assert seen == [("GET", "/geo/inspect", {"lat": "12.8231", "lon": "80.0442", "radius_m": "100.0"})]
+    assert r.source == "geo" and r.report == report and r.image == "data:image/jpeg;base64,SU1H"
+    assert "Copernicus Sentinel-2 L2A (ESA)" in r.note and "2026-09-30" in r.note and "not live footage" in r.note
+
+
+def test_geo_mode_no_image_is_reported_not_replaced():
+    detail = {"message": "No openly licensed imagery could be retrieved for this point.",
+              "attempts": [{"source": "OpenAerialMap", "result": "no OpenAerialMap imagery covers this point"},
+                           {"source": "Sentinel-2", "result": "no Sentinel-2 scene with under 40% cloud covers this point"}]}
+    r = camera_look(_geo_req(), http=httpx.Client(transport=httpx.MockTransport(lambda req: httpx.Response(404, json={"detail": detail}))))
+    assert r.source == "unavailable" and r.image is None and r.counts == {}
+    assert "no OpenAerialMap imagery" in r.note and "Nothing was substituted" in r.note
 
 
 def test_survey_endpoint():

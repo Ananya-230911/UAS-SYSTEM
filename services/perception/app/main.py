@@ -13,7 +13,7 @@ import base64
 import threading
 import time
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import camera, decision as decision_module, detection, lidar, obstacle
@@ -110,3 +110,23 @@ def get_decision(
             "guardrail_checks": rec.guardrail_checks,
         },
     }
+
+
+@app.get("/geo/inspect")
+def geo_inspect(
+    lat: float = Query(ge=-90, le=90),
+    lon: float = Query(ge=-180, le=180),
+    radius_m: float = Query(default=100.0, ge=20, le=1000),
+) -> dict:
+    """Real geographic imagery of (lat, lon) from an openly licensed source
+    (OpenAerialMap, else Copernicus Sentinel-2), analysed: aerial YOLOv8
+    where the resolution allows, land cover, and OpenStreetMap features
+    (labelled as map data). Records source, capture date and licence.
+    Retrieved imagery -- never presented as live drone footage. 404 with
+    each source's answer if no image exists; nothing is substituted."""
+    from app.geo.inspect import ImageryUnavailable, inspect_location
+
+    try:
+        return inspect_location(lat, lon, radius_m, inference_lock=_capture_lock)
+    except ImageryUnavailable as exc:
+        raise HTTPException(status_code=404, detail={"message": str(exc), "attempts": exc.attempts}) from exc

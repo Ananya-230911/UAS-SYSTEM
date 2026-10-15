@@ -100,10 +100,10 @@
           1. Search any place above the map (or just move the map there).
           2. Type one line and press Go. The drones split the area on your
           screen, talk to each other to decide who goes where and fly it
-          (simulated). When a drone reaches a place, the flight pauses, the
-          camera takes a picture right then and YOLOv8 detects what is in
-          it. Camera = this computer's webcam: start with
-          <code>scripts\run_all.ps1 -Webcam</code>.
+          (simulated). When a drone reaches a place, the flight pauses and
+          a REAL image of that place is retrieved and analysed (see
+          "Inspect a real location"). The drones are simulated; the image is
+          retrieved imagery with its source and date, not live footage.
         </p>
         <textarea id="cbba-survey-text" rows="2" placeholder="e.g. 3 drones survey this area"></textarea>
         <div class="button-row">
@@ -113,11 +113,47 @@
           </select>
           <button id="btn-cbba-survey-go">Go</button>
         </div>
+        <label class="cbba-field">At each place
+          <select id="cbba-camera-mode">
+            <option value="geo" selected>Real image of the place (satellite / aerial)</option>
+            <option value="webcam">Webcam demo (this computer's camera)</option>
+          </select>
+        </label>
         <p class="cbba-line cbba-muted cbba-legend">
           On the map: <span class="cbba-key cbba-key--talk"></span> drones sending bids to each other (deciding who does what) ·
-          <span class="cbba-key cbba-key--radio"></span> radio link · 📷 picture taken there (number = things detected; hover it).
+          <span class="cbba-key cbba-key--radio"></span> radio link · 🛰 real image of the place (number = objects detected; hover it).
         </p>
         <div id="cbba-survey-output" class="perception-panel"></div>
+      </section>
+
+      <section class="section-cbba section-geo">
+        <h2>📍 Inspect a real location</h2>
+        <p class="hint">
+          Pick any point on the map. The vision service retrieves a REAL
+          image of that place from an openly licensed source
+          (OpenAerialMap aerial imagery where it exists, otherwise
+          Copernicus Sentinel-2 satellite imagery), analyses it with
+          YOLOv8 where the resolution allows, and shows where the image
+          came from and when it was taken. It is retrieved imagery, not a
+          live drone camera.
+        </p>
+        <div class="button-row">
+          <button id="btn-geo-pick">Pick a point on the map</button>
+          <button id="btn-geo-centre">Use map centre</button>
+        </div>
+        <div class="button-row">
+          <label class="cbba-field">Area around the point
+            <select id="geo-radius">
+              <option value="50">±50 m</option>
+              <option value="100" selected>±100 m</option>
+              <option value="250">±250 m</option>
+              <option value="500">±500 m</option>
+            </select>
+          </label>
+          <label class="cbba-chip"><input type="checkbox" id="geo-overlay" checked />show the image on the map</label>
+          <button id="btn-geo-clear">Clear</button>
+        </div>
+        <div id="geo-output" class="perception-panel"></div>
       </section>
 
       <section class="section-cbba">
@@ -309,6 +345,7 @@
   <script src="vendor/leaflet/leaflet.js"></script>
   <script src="freshness.js"></script>
   <script src="app.js"></script>
+  <script src="geoinspect.js"></script>
   <script src="cbba.js"></script>
 </body>
 </html>

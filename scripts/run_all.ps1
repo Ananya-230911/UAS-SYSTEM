@@ -16,9 +16,15 @@
         .venv\Scripts\pip.exe install -r services\api\requirements.txt -r services\telemetry-gateway\requirements.txt -r simulation\sitl\requirements.txt -r services\fleet-agent\requirements.txt
 
 .PARAMETER Webcam
-    Also start the perception service (YOLOv8) with this computer's
-    webcam, so the quick survey's drones take a real picture at each
-    place. Needs the one-time perception install:
+    Start the vision service (perception, :8010) with this computer's
+    webcam for the "Webcam demo" option. Without it the vision service
+    still starts (it retrieves REAL geographic imagery of each place for
+    "Inspect a real location" and the quick survey; ADR-0022).
+
+.PARAMETER NoVision
+    Don't start the vision service at all.
+
+    The vision service needs the one-time install:
         .venv\Scripts\pip.exe install -r services\perception\requirements.txt
 
 .PARAMETER Count
@@ -39,6 +45,7 @@
 
 param(
     [switch]$Webcam,
+    [switch]$NoVision,
     [int]$Count = 3,
     [double]$HomeLat = 37.4275,
     [double]$HomeLon = -122.1697
@@ -93,15 +100,15 @@ if (Test-Up "http://127.0.0.1:8020/health") {
     & (Join-Path $PSScriptRoot "run_cbba.ps1")
 }
 
-# --- 2b. Camera (perception service :8010), only with -Webcam
-if ($Webcam) {
+# --- 2b. Vision service (perception :8010): real geographic imagery + YOLOv8
+if (-not $NoVision) {
     if (Test-Up "http://127.0.0.1:8010/health") {
-        Write-Warning "Perception service already running on :8010 -- close its window first if it was not started with -Webcam."
+        Write-Host "Vision service already running on :8010 -- not starting a second copy."
     } else {
         try {
-            & (Join-Path $PSScriptRoot "run_perception.ps1") -Webcam
+            & (Join-Path $PSScriptRoot "run_perception.ps1") -Webcam:$Webcam
         } catch {
-            Write-Warning "The camera service did not start: $($_.Exception.Message)"
+            Write-Warning "The vision service did not start: $($_.Exception.Message)"
         }
     }
 }
@@ -124,8 +131,8 @@ $checks = @(
     @{ Name = "CBBA server :8020  (Multi-drone panel)  "; Url = "http://127.0.0.1:8020/health"; Fix = "scripts\run_cbba.ps1 -- check its window for errors" },
     @{ Name = "Web page    :8080                       "; Url = "http://127.0.0.1:8080/"; Fix = "cd apps\gcs-web; ..\..\.venv\Scripts\python.exe -m http.server 8080" }
 )
-if ($Webcam) {
-    $checks += @{ Name = "Camera      :8010  (webcam + YOLOv8)     "; Url = "http://127.0.0.1:8010/health"; Fix = "scripts\run_perception.ps1 -Webcam -- check its window; one-time: .venv\Scripts\pip.exe install -r services\perception\requirements.txt" }
+if (-not $NoVision) {
+    $checks += @{ Name = "Vision      :8010  (real imagery + YOLO) "; Url = "http://127.0.0.1:8010/health"; Fix = "scripts\run_perception.ps1 -- check its window; one-time: .venv\Scripts\pip.exe install -r services\perception\requirements.txt" }
 }
 $allUp = $true
 foreach ($c in $checks) {

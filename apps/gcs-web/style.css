@@ -870,3 +870,14 @@ main {
 .cbba-story-btns { display: flex; gap: 0.35rem; flex-wrap: wrap; margin-top: 0.35rem; }
 .cbba-story-btns button { padding: 0.25rem 0.6rem; border: 1px solid #cbd5e1; border-radius: 5px; background: #fff; cursor: pointer; font-size: 0.8rem; }
 .cbba-story-btns button[data-story="fly"] { background: #2563eb; color: #fff; border-color: #2563eb; }
+
+/* Real geographic inspection */
+.section-geo { border-left: 4px solid #0891b2; }
+.geo-kind { font-weight: 700; color: #0e7490; font-size: 0.82rem; margin-bottom: 0.3rem; }
+.geo-img { width: 100%; border-radius: 6px; border: 1px solid var(--border); image-rendering: pixelated; }
+.geo-table { width: 100%; border-collapse: collapse; font-size: 0.76rem; margin: 0.3rem 0; }
+.geo-table th { text-align: left; color: var(--muted); font-weight: 600; padding: 0.1rem 0.4rem 0.1rem 0; vertical-align: top; white-space: nowrap; }
+.geo-table td { padding: 0.1rem 0; word-break: break-word; }
+.geo-limits li, .geo-dets li { font-size: 0.76rem; }
+.geo-proof { font-size: 0.7rem; word-break: break-word; }
+.geo-overlay { image-rendering: pixelated; }

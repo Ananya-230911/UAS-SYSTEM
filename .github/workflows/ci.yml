@@ -48,7 +48,7 @@ jobs:
         run: PYTHONPATH=. pytest tests/ -v
 
       - name: Check gcs-web JS syntax
-        run: node --check apps/gcs-web/app.js && node --check apps/gcs-web/freshness.js && node --check apps/gcs-web/cbba.js
+        run: node --check apps/gcs-web/app.js && node --check apps/gcs-web/freshness.js && node --check apps/gcs-web/cbba.js && node --check apps/gcs-web/geoinspect.js
 
       - name: Test gcs-web freshness logic
         run: node --test apps/gcs-web/tests/*.test.js

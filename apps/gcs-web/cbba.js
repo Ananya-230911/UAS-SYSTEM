@@ -1356,7 +1356,7 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
       const finished = sim.t >= end && !sim.running;
       html =
         `<div class="cbba-story-head">Flight (simulated) · t = ${Math.round(sim.t)} s · ${done.length} of ${state.points.length} places done</div>` +
-        (cameraBusy() ? '<div class="cbba-story-title">📷 Taking a picture - flight paused</div>' : deciding
+        (cameraBusy() ? `<div class="cbba-story-title">${cameraMode() === "geo" ? "🛰 Retrieving the real image of this place" : "📷 Taking a picture"} - flight paused</div>` : deciding
           ? '<div class="cbba-story-title">📡 The drones are deciding (orange lines = bids being sent)</div>'
           : finished ? '<div class="cbba-story-title">✓ Mission finished</div>' : "") +
         `<ul>${frame.drones.map((x) => `<li>${dot(x.id)}<b>${esc(x.id)}</b>: ${esc(CBBA_STATUS_TEXT[x.status] || x.status)} · battery ${Math.round(x.battery)}% · ${byDrone[x.id] || 0} place(s) done</li>`).join("")}</ul>` +
@@ -1379,24 +1379,25 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
   // When a drone reaches a point, ask the camera for a picture taken NOW
   // (once per point). The playback waits until it arrives (simTick).
   function cameraTick() {
-    const pts = new Set(state.points.map((p) => p.id));
+    const pts = Object.fromEntries(state.points.map((p) => [p.id, p]));
     for (const ins of cbbaInspections(sim.data.events)) {
       if (ins.t > sim.t) break;
       const key = `${ins.point}|${ins.drone}`;
-      if (survey.camera[key] || !pts.has(ins.point)) continue;
+      if (survey.camera[key] || !pts[ins.point]) continue;
       survey.camera[key] = "pending";
-      fetchCamera(key, ins, survey.gen);
+      fetchCamera(key, ins, pts[ins.point], survey.gen);
     }
   }
+  const cameraMode = () => ($("cbba-camera-mode") ? $("cbba-camera-mode").value : "geo");
   const cameraBusy = () => Object.values(survey.camera).includes("pending");
 
-  async function fetchCamera(key, ins, gen) {
+  async function fetchCamera(key, ins, p, gen) {
     let r;
     try {
       const resp = await fetch(`${CBBA_BASE}/survey/camera`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ drone_id: ins.drone, point_id: ins.point }),
+        body: JSON.stringify({ drone_id: ins.drone, point_id: ins.point, mode: cameraMode(), lat: p.lat, lon: p.lon }),
       });
       r = await resp.json();
       if (!resp.ok) throw new Error(resp.status);
@@ -1432,24 +1433,36 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
       if (!p) return;
       const name = cbbaShortName(i.point);
       const off = r.source === "unavailable";
-      const what = off ? "camera not connected" : cbbaCountsText(r.counts);
-      const total = off ? "✕" : Object.values(r.counts).reduce((a, b) => a + b, 0);
+      const geo = r.source === "geo";
+      const ran = geo && r.report && r.report.models_run && r.report.models_run.length;
+      const what = off ? (r.note || "no picture") : geo && !ran
+        ? `retrieved image (${(r.report.imagery || {}).gsd_m} m/px, no object detection)` : cbbaCountsText(r.counts);
+      const total = off ? "✕" : geo && !ran ? "" : Object.values(r.counts).reduce((a, b) => a + b, 0);
+      const icon = geo ? "🛰" : "📷";
       const img = safeImg(r.image);
       const newest = idx === ready.length - 1 && !ended;
       L.marker([p.lat, p.lon], {
-        icon: L.divIcon({ className: "cbba-cam-wrap", html: `<div class="cbba-cam${off ? " cbba-cam--off" : ""}">📷 ${total}</div>`, iconSize: [40, 16], iconAnchor: [-12, 26] }),
+        icon: L.divIcon({ className: "cbba-cam-wrap", html: `<div class="cbba-cam${off ? " cbba-cam--off" : ""}">${icon} ${total}</div>`, iconSize: [40, 16], iconAnchor: [-12, 26] }),
         bubblingMouseEvents: false,
       })
         .bindTooltip(`${img ? `<img class="cbba-cam-thumb" src="${img}" alt=""><br>` : ""}<b>${esc(name)}</b> (${esc(i.drone)}): ${esc(what)}`,
           { permanent: newest, direction: "top" })
         .addTo(camLayer);
+      // The newest real image, laid exactly over the area it shows.
+      if (newest && geo && r.report && r.report.imagery && r.report.imagery.bounds && typeof geoRawImage === "function") {
+        const b = r.report.imagery.bounds;
+        const raw = geoRawImage(r.report);
+        if (raw) L.imageOverlay(raw, [[b.south, b.west], [b.north, b.east]], { opacity: 0.85, interactive: false, className: "geo-overlay" }).addTo(camLayer);
+      }
       rows.push(`<li>${img ? `<img class="cbba-cam-mini" src="${img}" alt="">` : ""}<span class="cbba-dot" style="background:${color(i.drone)}"></span>` +
         `<b>${esc(name)}</b> (${esc(i.drone)}, t=${i.t} s): ${esc(what)}</li>`);
     });
 
     const parts = [survey.header || ""];
     if (waiting.length) {
-      parts.push(`<p class="cbba-line cbba-cam-wait">📷 ${waiting.map((i) => `${esc(i.drone)} is taking a picture at ${esc(cbbaShortName(i.point))}`).join("; ")}… (flight paused)</p>`);
+      parts.push(`<p class="cbba-line cbba-cam-wait">${cameraMode() === "geo"
+        ? `🛰 Retrieving the real image of ${waiting.map((i) => esc(cbbaShortName(i.point))).join(", ")} (for ${waiting.map((i) => esc(i.drone)).join(", ")})`
+        : `📷 ${waiting.map((i) => `${esc(i.drone)} is taking a picture at ${esc(cbbaShortName(i.point))}`).join("; ")}`}… (flight paused)</p>`);
     }
     if (ready.length) {
       const latest = res(ready[ready.length - 1]);
@@ -1457,17 +1470,23 @@ if (typeof document !== "undefined" && typeof L !== "undefined") (function () {
       const real = ready.map(res).filter((r) => r.source !== "unavailable");
       if (ended) {
         if (!real.length) {
-          parts.push('<div class="cbba-summary cbba-line"><b>Survey finished</b>, but no camera was connected, so nothing was detected.</div>');
+          parts.push('<div class="cbba-summary cbba-line"><b>Survey finished</b>, but no picture could be obtained, so nothing was analysed.</div>');
         } else {
           const totals = cbbaSumCounts(real.map((r) => r.counts));
+          const geoCount = real.filter((r) => r.source === "geo").length;
           parts.push(
-            `<div class="cbba-summary cbba-line"><b>Survey finished:</b> ${real.length} of ${state.points.length} place(s) photographed. ` +
+            `<div class="cbba-summary cbba-line"><b>Survey finished:</b> ${real.length} of ${state.points.length} place(s) ` +
+            `${geoCount ? "inspected with retrieved real imagery" : "photographed"}. ` +
             `Detected in total: ${esc(cbbaCountsText(totals))}.</div>`
           );
         }
       }
       if (latest.source === "unavailable") {
-        parts.push(`<p class="cbba-line cbba-issues">📷 ${esc(latest.note)}</p>`);
+        parts.push(`<p class="cbba-line cbba-issues">${cameraMode() === "geo" ? "🛰" : "📷"} ${esc(latest.note)}</p>`);
+      } else if (latest.source === "geo" && latest.report && typeof geoReportHtml === "function") {
+        const i = ready[ready.length - 1];
+        parts.push(`<div class="perception-heading">Latest place - ${esc(cbbaShortName(i.point))} (reached by simulated ${esc(i.drone)})</div>` +
+          geoReportHtml(latest.report));
       } else {
         const i = ready[ready.length - 1];
         parts.push(`<div class="perception-heading">Latest picture - ${esc(cbbaShortName(i.point))} (${esc(i.drone)})</div>` +
