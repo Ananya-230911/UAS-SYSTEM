@@ -16,6 +16,8 @@ import httpx
 
 OVERPASS_URL = os.environ.get("OVERPASS_URL", "https://overpass-api.de/api/interpreter")
 NOMINATIM_URL = os.environ.get("NOMINATIM_URL", "https://nominatim.openstreetmap.org")
+OVERPASS_MIRRORS = tuple(u for u in os.environ.get(
+    "OVERPASS_MIRRORS", "https://overpass.private.coffee/api/interpreter,https://overpass.kumi.systems/api/interpreter").split(",") if u)
 
 _ROADS = {"motorway", "trunk", "primary", "secondary", "tertiary", "unclassified", "residential", "service",
           "living_street", "motorway_link", "trunk_link", "primary_link", "secondary_link", "tertiary_link"}
@@ -80,9 +82,16 @@ def mapped_features(south: float, west: float, north: float, east: float, http: 
          f'way["landuse"]({b});way["leisure"]({b});way["natural"]({b});way["waterway"]({b});'
          f'nwr["amenity"]["name"]({b});'
          f");out geom;")
-    resp = http.post(OVERPASS_URL, data={"data": q})
-    resp.raise_for_status()
-    return summarise(resp.json().get("elements", []))
+    # The public Overpass servers are often busy (504); try a mirror next.
+    last: Exception | None = None
+    for url in (OVERPASS_URL, *OVERPASS_MIRRORS):
+        try:
+            resp = http.post(url, data={"data": q})
+            resp.raise_for_status()
+            return summarise(resp.json().get("elements", []))
+        except (httpx.HTTPError, ValueError) as exc:
+            last = exc
+    raise last  # type: ignore[misc]
 
 
 _nominatim_lock = threading.Lock()

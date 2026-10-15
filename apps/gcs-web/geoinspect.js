@@ -76,7 +76,8 @@ function geoReportHtml(rep, opts = {}) {
   const lc = rep.landcover;
   if (lc && lc.percent) {
     parts.push(`<p class="cbba-line"><b>Land cover:</b> ${Object.entries(lc.percent).map(([k, v]) => `${esc(k)} ${v}%`).join(" · ")}` +
-      `${lc.ndvi_mean != null ? ` · NDVI ${lc.ndvi_mean}` : ""}<br><span class="cbba-muted">${esc(lc.method)}</span></p>`);
+      `${lc.ndvi_mean != null ? ` · NDVI ${lc.ndvi_mean}` : ""}<br><span class="cbba-muted">${esc(lc.method)}</span>` +
+      `${lc.ndvi_warning ? `<br><span class="cbba-issues">${esc(lc.ndvi_warning)}</span>` : ""}</p>`);
   }
 
   // Map data, kept separate

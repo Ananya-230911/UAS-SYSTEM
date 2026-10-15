@@ -44,8 +44,24 @@ def landcover_sentinel2(scl: np.ndarray, red, nir) -> dict:
         res["method"] = "ESA Sentinel-2 Scene Classification (SCL); NDVI not available"
         return res
     clear = ~np.isin(scl, [0, 1, 3, 8, 9, 10])
-    ndvi = (np.ma.filled(nir, np.nan) - np.ma.filled(red, np.nan)) / (np.ma.filled(nir, np.nan) + np.ma.filled(red, np.nan) + 1e-6)
-    vals = ndvi[clear & np.isfinite(ndvi)]
+    # Surface reflectance is physically 0..1; small negative values (dark
+    # pixels after ESA's offset) are noise. Without this clip, NDVI blew
+    # up past 1 on the operator's PC (a value NDVI can never have).
+    r = np.clip(np.ma.filled(red, np.nan), 0.0, 1.0)
+    n = np.clip(np.ma.filled(nir, np.nan), 0.0, 1.0)
+    denom = n + r
+    ok = clear & np.isfinite(denom) & (denom > 0.02)  # skip near-zero denominators
+    ndvi = np.full(denom.shape, np.nan, dtype=np.float32)
+    ndvi[ok] = (n[ok] - r[ok]) / denom[ok]
+    vals = ndvi[ok]
+    # Cross-check with ESA's own classification: ground ESA calls "not
+    # vegetated" must not look strongly green. If it does, the bands are
+    # not what we think -- hide NDVI instead of showing a wrong number.
+    bare = ok & (scl == 5)
+    if bare.sum() >= 5 and float(np.nanmean(ndvi[bare])) > 0.5:
+        res["ndvi_warning"] = (f"NDVI not shown: it disagrees with ESA's classification (mean NDVI "
+                               f"{float(np.nanmean(ndvi[bare])):.2f} on ground ESA calls not vegetated)")
+        return res
     if vals.size:
         res["ndvi_mean"] = round(float(vals.mean()), 2)
         res["vegetation_density_percent"] = {

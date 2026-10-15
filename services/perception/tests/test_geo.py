@@ -287,3 +287,35 @@ def test_ndvi_bands_failing_keeps_the_image(tmp_path):
     assert _center(img.rgb) == MARK and img.extra["red"] is None and "NDVI not computed" in img.extra["bands_note"]
     lc = analysis.landcover_sentinel2(img.extra["scl"], None, None)
     assert lc["percent"] == {"vegetation": 100.0} and "NDVI not available" in lc["method"]
+
+
+def test_ndvi_stays_within_minus_one_to_one():
+    """The operator saw 'NDVI 1.2'. Dark pixels can get slightly negative
+    reflectance after ESA's offset; that must never give NDVI > 1."""
+    scl = np.full((10, 10), 4)
+    red = np.ma.array(np.full((10, 10), -0.03, np.float32))   # dark, negative after offset
+    nir = np.ma.array(np.full((10, 10), 0.01, np.float32))
+    lc = analysis.landcover_sentinel2(scl, red, nir)
+    assert -1.0 <= lc.get("ndvi_mean", 0) <= 1.0
+
+
+def test_ndvi_hidden_when_it_disagrees_with_esa():
+    scl = np.full((10, 10), 5)                                 # ESA: not vegetated
+    red = np.ma.array(np.full((10, 10), 0.01, np.float32))
+    nir = np.ma.array(np.full((10, 10), 0.30, np.float32))     # ...but looks very green
+    lc = analysis.landcover_sentinel2(scl, red, nir)
+    assert "ndvi_mean" not in lc and "disagrees with ESA" in lc["ndvi_warning"]
+
+
+def test_overpass_busy_falls_back_to_a_mirror(monkeypatch):
+    monkeypatch.setattr(osm, "OVERPASS_MIRRORS", ("https://mirror.example/api/interpreter",))
+    hosts = []
+
+    def handler(req):
+        hosts.append(req.url.host)
+        if req.url.host == "mirror.example":
+            return httpx.Response(200, json=OVERPASS)
+        return httpx.Response(504)
+
+    out = osm.mapped_features(12.82, 80.04, 12.83, 80.05, httpx.Client(transport=httpx.MockTransport(handler)))
+    assert hosts == ["overpass-api.de", "mirror.example"] and out["buildings"] == 2

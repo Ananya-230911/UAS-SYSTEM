@@ -60,3 +60,9 @@ test("only plain base64 becomes an image; helpers", () => {
   assert.equal(geoSourceLine(s2), "Copernicus Sentinel-2 L2A (ESA), captured 2026-09-30, 10.036 m per pixel");
   assert.doesNotMatch(geoReportHtml({ ...s2, imagery: { ...s2.imagery, source_url: "javascript:alert(1)" } }), /href="javascript/);
 });
+
+test("an NDVI warning is shown instead of a wrong NDVI", () => {
+  const h = geoReportHtml({ ...s2, landcover: { ...s2.landcover, ndvi_mean: undefined, ndvi_warning: "NDVI not shown: it disagrees with ESA's classification" } });
+  assert.match(h, /NDVI not shown: it disagrees with ESA&#39;s classification/);
+  assert.doesNotMatch(h, /· NDVI /);
+});
